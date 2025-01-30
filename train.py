@@ -58,14 +58,22 @@ class Enigma(LightningModule):
         rotor1=torch.nn.functional.one_hot(rotationArrayForRotor1,26) #This is a tensor of shape (length,26,26)
         rotor2=torch.nn.functional.one_hot(rotationArrayForRotor2,26)
         rotor3=torch.nn.functional.one_hot(rotationArrayForRotor3,26)
+        #Note, the above carries out the rotation of the rotors, with no gradient.
+
+   
 
 
         #Step 3: each letter has to go through the rotors, and the reflector.
         rotor1=self.rotor_1@rotor1
-        x=torch.bmm(x,rotor1)
         rotor2=self.rotor_2@rotor2
-        x=torch.bmm(x,rotor2)
         rotor3=self.rotor_3@rotor3
+        #To Do : Decide whether these 3 lines are necessary.
+        rotor1=rotor1+1e-6
+        rotor2=rotor2+1e-6
+        rotor3=rotor3+1e-6
+        #Finally, we have to apply the encoding
+        x=torch.bmm(x,rotor1)
+        x=torch.bmm(x,rotor2)
         x=torch.bmm(x,rotor3)
         x=self.reflector@x
         x=torch.bmm(x,rotor3)
