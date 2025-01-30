@@ -14,4 +14,4 @@ WORKDIR /app
 COPY . /app
 
 # Run the launch command with the num_trials -1 flag
-CMD ["python", "Launch.py", "--dir /data","--annotations /data/annotations","--log_path \data\logs", "--num_trials -1"]
+CMD ["python", "train.py"]
