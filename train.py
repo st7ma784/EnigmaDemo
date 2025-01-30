@@ -147,7 +147,7 @@ if __name__ == "__main__":
     print("DataModule : ",dm)
    
     #login as anonymous
-    wandb.login()
+    wandb.login(anonymous="allow")
     wandb_logger = WandbLogger(project='Enigma', entity='st7ma784')
 
     #enable Early stopping
