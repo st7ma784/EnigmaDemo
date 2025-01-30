@@ -29,17 +29,12 @@ class Enigma(LightningModule):
         else:
             raise ValueError("Invalid activation function")
         
-        self.encoder=nn.Sequential(
-            nn.Linear(26,26),
-            self.activation,
-            nn.Linear(26,26),
-            self.activation,
-            nn.Linear(26,26),
-            self.activation
-        )
+        
         self.rotor_positions=[0,0,0]
         self.rotateMatrix=torch.arange(26).unsqueeze(1)
+
     def configure_optimizers(self):
+    
         if self.optimizer_name=="adam":
             return torch.optim.Adam(self.parameters(),lr=self.learning_rate)
         elif self.optimizer_name=="sgd":
@@ -82,6 +77,7 @@ class Enigma(LightningModule):
         encoded,GT=batch #GT is the ground truth     -though the elegance of the enigma machine is that these can be the other way around and it will still work.
         decoded=self.forward(encoded)
         loss=self.loss(decoded,GT)
+        self.log("loss",loss)
         return loss
     
     def print_enigma_settings(self):
@@ -95,6 +91,7 @@ class Enigma(LightningModule):
         print("Batch Size : ",self.batch_size)
         print("Precision : ",self.precision)
         print("Activation : ",self.activation)
+
     def compare_to_gt(self,rotors,reflector):
         #This function will take a batch of ground truth rotors and reflectors, and compare them to the current settings.
         current_rotor1=self.rotor_1
@@ -104,6 +101,11 @@ class Enigma(LightningModule):
         rotor2Loss=torch.nn.functional.cross_entropy(current_rotor2,rotors[1])
         rotor3Loss=torch.nn.functional.cross_entropy(current_rotor3,rotors[2])
         reflectorLoss=torch.nn.functional.cross_entropy(self.reflector,reflector)
+        self.log("Rotor 1 Loss",rotor1Loss)
+        self.log("Rotor 2 Loss",rotor2Loss)
+        self.log("Rotor 3 Loss",rotor3Loss)
+        self.log("Reflector Loss",reflectorLoss)
+
         return rotor1Loss,rotor2Loss,rotor3Loss,reflectorLoss
 
         #We will compare the current settings to the ground truth settings.
@@ -135,22 +137,43 @@ if __name__ == "__main__":
     dm.setup()
     print("DataModule Created Successfully")
     print("DataModule : ",dm)
-
-    #train the model
-    
+   
     #login as anonymous
     wandb.login()
     wandb_logger = WandbLogger(project='Enigma', entity='st7ma784')
 
+    #enable Early stopping
+    early_stop_callback = pl.callbacks.EarlyStopping(
+        monitor='loss',
+        patience=3,
+        verbose=False,
+        mode='min'
+    )
+
+    #enable model checkpointing
+    checkpoint_callback = pl.callbacks.ModelCheckpoint(
+        monitor='loss',
+        dirpath='./',
+        filename='Enigma-{epoch:02d}-{loss:.2f}',
+        save_top_k=3,
+        mode='min',
+    )
+
+    #And finally a nice loading bar
+    progress_bar = pl.callbacks.ProgressBar()
+
+
     trainer=pl.Trainer(max_epochs=10,
                         device="auto",
                         accelerator="auto",
-                        logger=wandb_logger)
+                        logger=wandb_logger,
+                        callbacks=[early_stop_callback,checkpoint_callback,progress_bar])
                         # have a look at the other flags that can be set here.
 
     
     trainer.fit(model,dm)
 
+    model.compare_to_gt(dm.rotors,dm.reflector)
 
     print("Model Trained Successfully")
 
