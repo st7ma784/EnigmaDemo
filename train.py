@@ -47,7 +47,7 @@ class Rotor(nn.Module):
         rotationMatrix=rotationMatrix%26
         rotationMatrix=torch.nn.functional.one_hot(rotationMatrix,26).float()
         #Test - Add some noise to the rotation matrix?
-        rotationMatrix=torch.matmul(rotationMatrix,nn.functional.softplus(self.rotor).unsqueeze(0)).unsqueeze(0)
+        rotationMatrix=torch.matmul(rotationMatrix,self.rotor.unsqueeze(0)).unsqueeze(0)
 
         #Test Consider Other ways of doing this? Maybe softmax? Do methods like Gumbel softmax work here? 
 
@@ -68,7 +68,7 @@ class Rotor(nn.Module):
         rotationMatrix=torch.add(torch.arange(26,dtype=torch.long).unsqueeze(0),self.generate_rotation_matrix(Sequence_Length).unsqueeze(1))
         rotationMatrix=rotationMatrix%26
         rotationMatrix=torch.nn.functional.one_hot(rotationMatrix,26).float()
-        rotationMatrix=torch.matmul(rotationMatrix,nn.functional.softplus(self.rotor).unsqueeze(0)).view(1,Sequence_Length,26,26)
+        rotationMatrix=torch.matmul(rotationMatrix,self.rotor.unsqueeze(0)).view(1,Sequence_Length,26,26)
         rotationMatrix=rotationMatrix.repeat(Batch_Size,1,1,1)
         rotationMatrix=rotationMatrix.flatten(0,1)
         rotationMatrix=rotationMatrix.permute(0,2,1) # This is the line that's different, reflecting that we're going the other direction through the rotor.
