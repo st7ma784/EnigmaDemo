@@ -11,7 +11,7 @@ from scipy.optimize import linear_sum_assignment as LSA
 #The rotor class will have a forward and reverse function.
 
 #HACKER TASK: Have a look at how this repo is training assignment matrices - and copy into the rotor class!  https://github.com/HeddaCohenIndelman/Learning-Gumbel-Sinkhorn-Permutations-w-Pytorch/blob/master/my_sorting_train.py 
-
+#             A better walkthrough of the ideas are here : https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/DL2/sampling/permutations.html
 class Rotor(nn.Module):
     def __init__(self,position=1):
         super().__init__()
@@ -106,6 +106,7 @@ class Enigma(LightningModule):
         self.R2=Rotor(2)
         self.R3=Rotor(3)
         self.REF=Rotor(0)
+        self.softmax=nn.Softmax(dim=2)
         if activation=="gelu":
             self.activation=nn.GELU()
         elif activation=="relu":
@@ -133,11 +134,11 @@ class Enigma(LightningModule):
     def forward(self,x):
         # Test: Do we want an activation function here?
         x=self.R1(x)
-
+        x=self.activation(x)
         x=self.R2(x)
 
         x=self.R3(x)
-
+        x=self.activation(x)
         x=self.REF(x)
 
         x=self.R1.reverse(x)
@@ -147,7 +148,7 @@ class Enigma(LightningModule):
         x=self.R3.reverse(x)
 
         #Test: Do we want to do something like a softmax to force the gradient to a letter?
-        x=torch.nn.functional.gumbel_softmax(x,dim=2,hard=True)
+        x=self.softmax(x)
         return x
     
     def training_step(self,batch,batch_idx):
@@ -155,6 +156,7 @@ class Enigma(LightningModule):
 
         GT=torch.nn.functional.one_hot(GT,26).permute(0,2,1).to(dtype=torch.float)
         encoded=torch.nn.functional.one_hot(encoded,26).to(dtype=torch.float)
+        
         #TEST: Does adding noise help? 
         encoded = encoded 
         decoded=self.forward(encoded)

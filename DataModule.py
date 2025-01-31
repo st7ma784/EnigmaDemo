@@ -46,7 +46,6 @@ class EnigmaDataset(torch.utils.data.IterableDataset):
         # make these into 2d arrays with one_hot encoding
         self.rotors=rotors
         self.reflector=reflector
-        self.rotor_positions=[0,0,0]
         rotateMatrix=torch.arange(26)+1 #This is the matrix that will be used to rotate the rotors.
         rotateMatrix[-1]=0
         self.rotateMatrix=torch.nn.functional.one_hot(rotateMatrix,26)
@@ -60,22 +59,23 @@ class EnigmaDataset(torch.utils.data.IterableDataset):
 
         GROUND_TRUTH= torch.randint(0,26,(150,),dtype=torch.long)
         encoded=GROUND_TRUTH.clone()
+        rotor_positions=[0,0,0]
         for i in range(150):
             #Rotate the rotors
-            self.rotor_positions[0]=(self.rotor_positions[0]+1)%26
-            if self.rotor_positions[0]==0:
-                self.rotor_positions[1]=(self.rotor_positions[1]+1)%26
-                if self.rotor_positions[1]==0:
-                    self.rotor_positions[2]=(self.rotor_positions[2]+1)%26
+            rotor_positions[0]=(rotor_positions[0]+1)%26
+            if rotor_positions[0]==0:
+                rotor_positions[1]=(rotor_positions[1]+1)%26
+                if rotor_positions[1]==0:
+                    rotor_positions[2]=(rotor_positions[2]+1)%26
             #Encode the letter
-            letterAfterFirstRotor= self.rotors[0][(self.rotor_positions[0]+encoded[i])%26]
-            letterAfterSecondRotor= self.rotors[1][(self.rotor_positions[1] + letterAfterFirstRotor)%26]
-            letterAfterThirdRotor= self.rotors[2][(self.rotor_positions[2] + letterAfterSecondRotor)%26]
+            letterAfterFirstRotor= self.rotors[0][(rotor_positions[0]+encoded[i])%26]
+            letterAfterSecondRotor= self.rotors[1][(rotor_positions[1] + letterAfterFirstRotor)%26]
+            letterAfterThirdRotor= self.rotors[2][(rotor_positions[2] + letterAfterSecondRotor)%26]
             reflectedLetter=self.reflector[letterAfterThirdRotor]
             #Now we have to go back through the rotors
-            letterReturningThroughThirdRotor=self.rotors[2][(self.rotor_positions[2]+reflectedLetter)%26]
-            letterReturningThroughSecondRotor=self.rotors[1][(self.rotor_positions[1]+letterReturningThroughThirdRotor)%26]
-            letterReturningThroughFirstRotor=self.rotors[0][(self.rotor_positions[0]+letterReturningThroughSecondRotor)%26]
+            letterReturningThroughThirdRotor=self.rotors[2][(rotor_positions[2]+reflectedLetter)%26]
+            letterReturningThroughSecondRotor=self.rotors[1][(rotor_positions[1]+letterReturningThroughThirdRotor)%26]
+            letterReturningThroughFirstRotor=self.rotors[0][(rotor_positions[0]+letterReturningThroughSecondRotor)%26]
             #This is the encoded letter
             encoded[i]=letterReturningThroughFirstRotor
 
