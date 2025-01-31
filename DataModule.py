@@ -16,15 +16,16 @@ class EnigmaDataModule(pl.LightningDataModule):
             rotorA=torch.randperm(26)
             rotorB=torch.randperm(26)
             rotorC=torch.randperm(26)
+            
+            self.rotors=[rotorA,rotorB,rotorC]
+        if reflector is None:
             reflector=torch.randperm(26)
             #The rule of the reflector is that no letter can map to itself.
             while (reflector==torch.arange(26)).sum()>0:
                 reflector=torch.randperm(26)
-
-            rotors=[rotorA,rotorB,rotorC]
-
+            self.reflector=reflector
         #These constitute the GROUND Truth Enigma settings. 
-        self.dataset=EnigmaDataset(rotors,reflector)
+        self.dataset=EnigmaDataset(self.rotors,self.reflector)
 
     def train_dataloader(self):
         #This is the dataloader that will be used for training.
@@ -58,7 +59,7 @@ class EnigmaDataset(torch.utils.data.IterableDataset):
         #This is the logic for the enigma machine
         #We will generate a sequence of 50 random letters, then encode it.
 
-        GROUND_TRUTH= torch.randint(0,26,(150,))
+        GROUND_TRUTH= torch.randint(0,26,(150,),dtype=torch.long)
         encoded=GROUND_TRUTH.clone()
         for i in range(150):
             #Rotate the rotors
@@ -86,3 +87,12 @@ class EnigmaDataset(torch.utils.data.IterableDataset):
               
         
         return encoded,GROUND_TRUTH
+    
+if __name__=="__main__":
+    dm=EnigmaDataModule()
+    dl=dm.train_dataloader()
+    for i in dl:
+        print(i)
+        break
+    print("done")
+    #print(dl)
