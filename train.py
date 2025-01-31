@@ -34,9 +34,9 @@ class Rotor(nn.Module):
     def generate_rotation_matrixPos1(self,sequence_length):
         return torch.arange(sequence_length,dtype=torch.long)%26
     def generate_rotation_matrixPos2(self,sequence_length):
-        return (torch.arange(sequence_length,dtype=torch.long)//26)+1 %26
+        return (torch.arange(sequence_length,dtype=torch.long)//26) %26
     def generate_rotation_matrixPos3(self,sequence_length):
-        return (torch.arange(sequence_length,dtype=torch.long)//676)+1 %26
+        return (torch.arange(sequence_length,dtype=torch.long)//676) %26
     def forward(self,signalInput): 
         #signalInput is a tensor of shape (B,S,26) 
         Batch_Size=signalInput.shape[0]
@@ -45,17 +45,13 @@ class Rotor(nn.Module):
         rotationMatrix=torch.add(torch.arange(26,dtype=torch.long).unsqueeze(0),self.generate_rotation_matrix(Sequence_Length).unsqueeze(1))
         #Step 2: ensure the rotation matrix is <26
         rotationMatrix=rotationMatrix%26
-        #plot the rotation matrix
         rotationMatrix=torch.nn.functional.one_hot(rotationMatrix,26).float()
         #Test - Add some noise to the rotation matrix?
         rotationMatrix=torch.matmul(rotationMatrix,nn.functional.softplus(self.rotor).unsqueeze(0)).unsqueeze(0)
 
         #Test Consider Other ways of doing this? Maybe softmax? Do methods like Gumbel softmax work here? 
 
-
-        #shape is now (1, sequence_length,26,26)
         rotationMatrix=rotationMatrix.repeat(Batch_Size,1,1,1)
-        #flatten the rotation matrix
         rotationMatrix=rotationMatrix.flatten(0,1)
         # Step 3: Apply the rotation matrix to the signal input
         signalInput = torch.bmm(signalInput.flatten(0,1).unsqueeze(1),rotationMatrix)
@@ -133,12 +129,12 @@ class Enigma(LightningModule):
 
     def forward(self,x):
         # Test: Do we want an activation function here?
-        x=self.R1(x)
         x=self.activation(x)
+
+        x=self.R1(x)
         x=self.R2(x)
 
         x=self.R3(x)
-        x=self.activation(x)
         x=self.REF(x)
 
         x=self.R1.reverse(x)
@@ -146,6 +142,7 @@ class Enigma(LightningModule):
         x=self.R2.reverse(x)
 
         x=self.R3.reverse(x)
+        x=self.activation(x)
 
         #Test: Do we want to do something like a softmax to force the gradient to a letter?
         x=self.softmax(x)
@@ -156,7 +153,7 @@ class Enigma(LightningModule):
 
         GT=torch.nn.functional.one_hot(GT,26).permute(0,2,1).to(dtype=torch.float)
         encoded=torch.nn.functional.one_hot(encoded,26).to(dtype=torch.float)
-        
+        encoded.requires_grad=True
         #TEST: Does adding noise help? 
         encoded = encoded 
         decoded=self.forward(encoded)
@@ -165,7 +162,6 @@ class Enigma(LightningModule):
         return loss
     
     def on_train_epoch_end(self):
-        #Test How close we are to the ground truth settings
         self.compare_to_gt(self.trainer.datamodule.dataset.rotors,self.trainer.datamodule.dataset.reflector)
 
 
@@ -207,11 +203,8 @@ class Enigma(LightningModule):
         ax4.imshow(self.REF.rotor.detach().numpy())
         ax4.set_title("Reflector")
         #save to figure and log it
-        #self.logger.experiment.log({"Rotor 1":fig})
         fig.savefig("Rotors.png")
         plt.close(fig)
-        # self.logger.experiment.log({"Rotors":wandb.Image("Rotors.png")})
-
         LSA_score=self.convertParametertoConfidence(self.R1.rotor)
         self.log("Rotor 1 Confidence",LSA_score)
         LSA_score=self.convertParametertoConfidence(self.R2.rotor)
@@ -219,18 +212,12 @@ class Enigma(LightningModule):
         LSA_score=self.convertParametertoConfidence(self.R3.rotor)
         self.log("Rotor 3 Confidence",LSA_score)
         LSA_score=self.convertParametertoConfidence(self.REF.rotor)
-        self.log("Reflector Confidence",LSA_score)
-
-
-        # print("Mean Solution loss : ",(rotor1Loss+rotor2Loss+rotor3Loss+reflectorLoss)/4)
-      
+        self.log("Reflector Confidence",LSA_score)     
         return rotor1Loss,rotor2Loss,rotor3Loss,reflectorLoss
 
-        #We will compare the current settings to the ground truth settings.
 
     def convertParametertoConfidence(self, param):
         #This function will take a tensor of shape (26,26) and convert it to a tensor of shape (26,26) where each row is a probability distribution.
-        #This is done by normalizing the tensor along the 0th axis.
         param=nn.functional.softplus(param)
         cost_matrix=(param/ (26*torch.norm(param,dim=1,keepdim=True))).detach().numpy()
         col_ind,row_ind=LSA(cost_matrix,maximize=True)

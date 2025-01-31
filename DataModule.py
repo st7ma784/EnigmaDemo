@@ -30,7 +30,7 @@ class EnigmaDataModule(pl.LightningDataModule):
         #This is the dataloader that will be used for training.
 
         # There are some other flags that may be worth playing with, such as num_workers, pin_memory, and prefetch_factor, what do they do?
-        return torch.utils.data.DataLoader(self.dataset,batch_size=16,num_workers=4,pin_memory=True,prefetch_factor=2)
+        return torch.utils.data.DataLoader(self.dataset,batch_size=16,num_workers=4,pin_memory=True)
     
     def val_dataloader(self):
         return torch.utils.data.DataLoader(self.dataset,batch_size=16)
@@ -52,7 +52,7 @@ class EnigmaDataset(torch.utils.data.IterableDataset):
     def __iter__(self):
         return self
     def __len__(self):
-        return 1000
+        return 10000
     def __next__(self):
         #This is the logic for the enigma machine
         #We will generate a sequence of 50 random letters, then encode it.
