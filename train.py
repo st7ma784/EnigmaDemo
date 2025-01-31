@@ -281,7 +281,7 @@ if __name__ == "__main__":
     progress_bar = pl.callbacks.TQDMProgressBar()
 
 
-    trainer=pl.Trainer(max_epochs=100,
+    trainer=pl.Trainer(max_epochs=500,
                        max_steps=30000,
                         devices="auto",
                         accelerator="auto",
