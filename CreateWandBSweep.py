@@ -4,7 +4,7 @@ wandb.login(anonymous="allow")
 # Create a sweep configuration as found at https://docs.wandb.ai/guides/sweeps/define-sweep-configuration/
 if __name__=="__main__":
     sweep_config = {
-        'method': 'random',  # Randomly sample the hyperparameter space (alternatives: grid, bayes)
+        'method': 'bayes',  # Randomly sample the hyperparameter space (alternatives: grid, random)
         'job_type': 'train',  # This is a training sweep
         'program': 'train.py',  # This is the script to be run
     
@@ -29,7 +29,7 @@ if __name__=="__main__":
                 "values":["adam","sgd"]
             },
             "loss":{
-                "values":["CrossEntropy","MSE"]
+                "values":["CrossEntropy","MSELoss"]
             }
         }
     }
@@ -38,4 +38,4 @@ if __name__=="__main__":
     sweep_id = wandb.sweep(sweep_config, project="Enigma", entity="st7ma784")
     import os
     # Initialize a new wandb agent and run the train.py script with the sweep_id args
-    os.system(f"wandb agent {sweep_id} --count 10")
+    os.system(f"wandb agent {sweep_id} --count 100")

@@ -139,6 +139,7 @@ class Enigma(LightningModule):
         # x=self.activation(x)
 
         #Test: Do we want to do something like a softmax to force the gradient to a letter?
+        x=torch.nn.functional.softmax(x,dim=2) ##what happens if this is removed? 
         return x
     
     def training_step(self,batch,batch_idx):
@@ -177,22 +178,30 @@ class Enigma(LightningModule):
         rotor2Loss=torch.nn.functional.cross_entropy(self.R2.rotor/torch.norm(self.R2.rotor,dim=(0,1),keepdim=True),rotors[1])
         rotor3Loss=torch.nn.functional.cross_entropy(self.R3.rotor.T/torch.norm(self.R3.rotor,dim=(0,1),keepdim=True),rotors[2])
         reflectorLoss=torch.nn.functional.cross_entropy(self.REF.rotor/torch.norm(self.REF.rotor,dim=(0,1),keepdim=True),reflector)
-        
+        self.log("Rotor 1 Loss",rotor1Loss, prog_bar=True)
+        self.log("Rotor 2 Loss",rotor2Loss, prog_bar=True) 
+        self.log("Rotor 3 Loss",rotor3Loss, prog_bar=True)
+        self.log("Reflector Loss",reflectorLoss, prog_bar=True)
+        self.log("Test Loss",(rotor1Loss+rotor2Loss+rotor3Loss+reflectorLoss)/4,prog_bar=True)
         #use imshow to display the rotors and reflectors
         fig=plt.figure()
         ax1=fig.add_subplot(221)
         ax1.imshow(self.R1.rotor.detach().numpy())
+        ax1.set_title("Rotor 1")
         ax2=fig.add_subplot(222)
         ax2.imshow(self.R2.rotor.detach().numpy())
+        ax2.set_title("Rotor 2")
         ax3=fig.add_subplot(223)
         ax3.imshow(self.R3.rotor.detach().numpy())
+        ax3.set_title("Rotor 3")
         ax4=fig.add_subplot(224)
         ax4.imshow(self.REF.rotor.detach().numpy())
+        ax4.set_title("Reflector")
         #save to figure and log it
         #self.logger.experiment.log({"Rotor 1":fig})
         fig.savefig("Rotors.png")
         plt.close(fig)
-        self.logger.experiment.log({"Rotors":wandb.Image("Rotors.png")})
+        # self.logger.experiment.log({"Rotors":wandb.Image("Rotors.png")})
 
         LSA_score=self.convertParametertoConfidence(self.R1.rotor)
         self.log("Rotor 1 Confidence",LSA_score)
@@ -205,11 +214,7 @@ class Enigma(LightningModule):
 
 
         # print("Mean Solution loss : ",(rotor1Loss+rotor2Loss+rotor3Loss+reflectorLoss)/4)
-        self.log("Rotor 1 Loss",rotor1Loss, prog_bar=True)
-        self.log("Rotor 2 Loss",rotor2Loss, prog_bar=True) 
-        self.log("Rotor 3 Loss",rotor3Loss, prog_bar=True)
-        self.log("Reflector Loss",reflectorLoss, prog_bar=True)
-        self.log("Test Loss",(rotor1Loss+rotor2Loss+rotor3Loss+reflectorLoss)/4,prog_bar=True)
+      
         return rotor1Loss,rotor2Loss,rotor3Loss,reflectorLoss
 
         #We will compare the current settings to the ground truth settings.
@@ -231,11 +236,11 @@ if __name__ == "__main__":
     from pytorch_lightning.loggers import WandbLogger
     parser = argparse.ArgumentParser()
     parser.add_argument("--optimizer_name",type=str,default="sgd")
-    parser.add_argument("--learning_rate",type=float,default=1e-2)
-    parser.add_argument("--batch_size",type=int,default=32)
+    parser.add_argument("--learning_rate",type=float,default=1e-3)
+    parser.add_argument("--batch_size",type=int,default=64)
     parser.add_argument("--precision",type=str,default="32")
     parser.add_argument("--activation",type=str,default="sigmoid")
-    parser.add_argument("--loss",type=str,default="MSELoss")
+    parser.add_argument("--loss",type=str,default="CrossEntropy")
     args=parser.parse_args()
     model=Enigma(args.optimizer_name,args.learning_rate,args.batch_size,args.precision,args.activation,args.loss)
     model.print_enigma_settings()

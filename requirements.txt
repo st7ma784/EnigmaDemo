@@ -1,3 +1,4 @@
 wandb 
 pytorch-lightning
 matplotlib
+scipy
