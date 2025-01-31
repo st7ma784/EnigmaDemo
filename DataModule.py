@@ -21,7 +21,7 @@ class EnigmaDataModule(pl.LightningDataModule):
             while (reflector==torch.arange(26)).sum()>0:
                 reflector=torch.randperm(26)
 
-            self.rotors=[rotorA,rotorB,rotorC]
+            rotors=[rotorA,rotorB,rotorC]
 
         #These constitute the GROUND Truth Enigma settings. 
         self.dataset=EnigmaDataset(rotors,reflector)
@@ -44,14 +44,16 @@ class EnigmaDataset(torch.utils.data.IterableDataset):
         self.rotors=rotors
         self.reflector=reflector
         # make these into 2d arrays with one_hot encoding
-        self.rotors=[torch.nn.functional.one_hot(rotor,26) for rotor in rotors]
-        self.reflector=torch.nn.functional.one_hot(reflector,26)
+        self.rotors=rotors
+        self.reflector=reflector
         self.rotor_positions=[0,0,0]
         rotateMatrix=torch.arange(26)+1 #This is the matrix that will be used to rotate the rotors.
         rotateMatrix[-1]=0
         self.rotateMatrix=torch.nn.functional.one_hot(rotateMatrix,26)
     def __iter__(self):
         return self
+    def __len__(self):
+        return 1000
     def __next__(self):
         #This is the logic for the enigma machine
         #We will generate a sequence of 50 random letters, then encode it.
@@ -66,12 +68,21 @@ class EnigmaDataset(torch.utils.data.IterableDataset):
                 if self.rotor_positions[1]==0:
                     self.rotor_positions[2]=(self.rotor_positions[2]+1)%26
             #Encode the letter
-            encoded[i]=self.rotors[2][self.rotor_positions[2]].dot(self.rotors[1][self.rotor_positions[1]].dot(self.rotors[0][self.rotor_positions[0]].dot(self.reflector.dot(self.rotors[0][self.rotor_positions[0]].dot(self.rotors[1][self.rotor_positions[1]].dot(self.rotors[2][self.rotor_positions[2]]))))))[GROUND_TRUTH[i]]
-        ## To Do: 
+            letterAfterFirstRotor= self.rotors[0][(self.rotor_positions[0]+encoded[i])%26]
+            letterAfterSecondRotor= self.rotors[1][(self.rotor_positions[1] + letterAfterFirstRotor)%26]
+            letterAfterThirdRotor= self.rotors[2][(self.rotor_positions[2] + letterAfterSecondRotor)%26]
+            reflectedLetter=self.reflector[letterAfterThirdRotor]
+            #Now we have to go back through the rotors
+            letterReturningThroughThirdRotor=self.rotors[2][(self.rotor_positions[2]+reflectedLetter)%26]
+            letterReturningThroughSecondRotor=self.rotors[1][(self.rotor_positions[1]+letterReturningThroughThirdRotor)%26]
+            letterReturningThroughFirstRotor=self.rotors[0][(self.rotor_positions[0]+letterReturningThroughSecondRotor)%26]
+            #This is the encoded letter
+            encoded[i]=letterReturningThroughFirstRotor
+
+        ## To Experiment with: 
         # -  Add noise to the encoded message? Try randomizing a character in the encoded message, to represent a mistake in the encoding.
         # -  Try doing the above step with linear algebra, to make it faster and remove the for loop and the if statements.
-        
-        
-        
+        # -        -- HINT: You may want to think of the rotors as 1-hot encoded matrices of shape 26,26 and the encoding as a matrix multiplication. 
+              
         
         return encoded,GROUND_TRUTH
