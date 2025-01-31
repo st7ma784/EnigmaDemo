@@ -5,6 +5,13 @@ import torch.nn as nn
 import torch
 import matplotlib.pyplot as plt
 from scipy.optimize import linear_sum_assignment as LSA
+
+
+#This is the rotor class. It will take a signal input, and rotate it by a certain amount.
+#The rotor class will have a forward and reverse function.
+
+#HACKER TASK: Have a look at how this repo is training assignment matrices - and copy into the rotor class!  https://github.com/HeddaCohenIndelman/Learning-Gumbel-Sinkhorn-Permutations-w-Pytorch/blob/master/my_sorting_train.py 
+
 class Rotor(nn.Module):
     def __init__(self,position=1):
         super().__init__()
@@ -21,7 +28,6 @@ class Rotor(nn.Module):
             self.generate_rotation_matrix=self.generate_rotation_matrixPos3
         else:
             raise ValueError("Invalid rotor position")
-        self.rotation_matrix=torch.arange(26)+1 
         
     def generate_rotation_matrixPos0(self,sequence_length):
         return torch.zeros(sequence_length,dtype=torch.long)
@@ -42,9 +48,9 @@ class Rotor(nn.Module):
         #plot the rotation matrix
         rotationMatrix=torch.nn.functional.one_hot(rotationMatrix,26).float()
         #Test - Add some noise to the rotation matrix?
-        rotationMatrix=torch.matmul(rotationMatrix,(self.rotor/torch.norm(self.rotor,dim=(1),keepdim=True)).unsqueeze(0)).unsqueeze(0)
+        rotationMatrix=torch.matmul(rotationMatrix,nn.functional.softplus(self.rotor).unsqueeze(0)).unsqueeze(0)
 
-        #Test Consider Other ways of doing this? Maybe softmax? Do methods like Gumbel softmax work here?
+        #Test Consider Other ways of doing this? Maybe softmax? Do methods like Gumbel softmax work here? 
 
 
         #shape is now (1, sequence_length,26,26)
@@ -52,15 +58,11 @@ class Rotor(nn.Module):
         #flatten the rotation matrix
         rotationMatrix=rotationMatrix.flatten(0,1)
         # Step 3: Apply the rotation matrix to the signal input
-        # signalInput is of shape (B,S,26)
         signalInput = torch.bmm(signalInput.flatten(0,1).unsqueeze(1),rotationMatrix)
-        #signalInput is now of shape (B*S,26,1)
         # Step 4: Remove the last dimension
-        signalInput=signalInput.squeeze(1)
-        signalInput=signalInput.unflatten(0,(Batch_Size,Sequence_Length))  
+        signalInput=signalInput.unflatten(0,(Batch_Size,Sequence_Length)).view(Batch_Size,Sequence_Length,26)
 
         #Test Add some sort of activation function here?
-        signalInput=torch.nn.functional.softmax(signalInput,dim=2)
         return signalInput
     
     def reverse(self,signalInput): 
@@ -70,14 +72,13 @@ class Rotor(nn.Module):
         rotationMatrix=torch.add(torch.arange(26,dtype=torch.long).unsqueeze(0),self.generate_rotation_matrix(Sequence_Length).unsqueeze(1))
         rotationMatrix=rotationMatrix%26
         rotationMatrix=torch.nn.functional.one_hot(rotationMatrix,26).float()
-        rotationMatrix=torch.add(rotationMatrix,0.01*torch.randn_like(rotationMatrix))
-        rotationMatrix=torch.matmul(rotationMatrix,(self.rotor/torch.norm(self.rotor,dim=1,keepdim=True)).unsqueeze(0)).unsqueeze(0)
+        rotationMatrix=torch.matmul(rotationMatrix,nn.functional.softplus(self.rotor).unsqueeze(0)).view(1,Sequence_Length,26,26)
         rotationMatrix=rotationMatrix.repeat(Batch_Size,1,1,1)
         rotationMatrix=rotationMatrix.flatten(0,1)
         rotationMatrix=rotationMatrix.permute(0,2,1) # This is the line that's different, reflecting that we're going the other direction through the rotor.
         signalInput = torch.bmm(signalInput.flatten(0,1).unsqueeze(1),rotationMatrix)
-        signalInput=signalInput.squeeze(1)
-        signalInput=signalInput.unflatten(0,(Batch_Size,Sequence_Length))  
+        signalInput=signalInput.unflatten(0,(Batch_Size,Sequence_Length)).view(Batch_Size,Sequence_Length,26)
+
         return signalInput
         
 
@@ -131,30 +132,22 @@ class Enigma(LightningModule):
 
     def forward(self,x):
         # Test: Do we want an activation function here?
-        x=self.activation(x)
         x=self.R1(x)
-        x=self.activation(x)
 
         x=self.R2(x)
-        x=self.activation(x)
 
         x=self.R3(x)
-        x=self.activation(x)
+
         x=self.REF(x)
-        x=self.activation(x)
 
         x=self.R1.reverse(x)
-        x=self.activation(x)
 
         x=self.R2.reverse(x)
 
-        x=self.activation(x)
         x=self.R3.reverse(x)
-        x=self.activation(x)
-
 
         #Test: Do we want to do something like a softmax to force the gradient to a letter?
-        x=torch.nn.functional.softmax(x,dim=2) ##what happens if this is removed? 
+        x=torch.nn.functional.gumbel_softmax(x,dim=2,hard=True)
         return x
     
     def training_step(self,batch,batch_idx):
@@ -162,7 +155,6 @@ class Enigma(LightningModule):
 
         GT=torch.nn.functional.one_hot(GT,26).permute(0,2,1).to(dtype=torch.float)
         encoded=torch.nn.functional.one_hot(encoded,26).to(dtype=torch.float)
-        encoded.requires_grad=True
         #TEST: Does adding noise help? 
         encoded = encoded 
         decoded=self.forward(encoded)
@@ -191,7 +183,7 @@ class Enigma(LightningModule):
         #This function will take a batch of ground truth rotors and reflectors, and compare them to the current settings.
         rotor1Loss=torch.nn.functional.cross_entropy(self.R1.rotor/torch.norm(self.R1.rotor,dim=(0,1),keepdim=True),rotors[0]) 
         rotor2Loss=torch.nn.functional.cross_entropy(self.R2.rotor/torch.norm(self.R2.rotor,dim=(0,1),keepdim=True),rotors[1])
-        rotor3Loss=torch.nn.functional.cross_entropy(self.R3.rotor.T/torch.norm(self.R3.rotor,dim=(0,1),keepdim=True),rotors[2])
+        rotor3Loss=torch.nn.functional.cross_entropy(self.R3.rotor/torch.norm(self.R3.rotor,dim=(0,1),keepdim=True),rotors[2])
         reflectorLoss=torch.nn.functional.cross_entropy(self.REF.rotor/torch.norm(self.REF.rotor,dim=(0,1),keepdim=True),reflector)
         self.log("Rotor 1 Loss",rotor1Loss, prog_bar=True)
         self.log("Rotor 2 Loss",rotor2Loss, prog_bar=True) 
@@ -237,7 +229,8 @@ class Enigma(LightningModule):
     def convertParametertoConfidence(self, param):
         #This function will take a tensor of shape (26,26) and convert it to a tensor of shape (26,26) where each row is a probability distribution.
         #This is done by normalizing the tensor along the 0th axis.
-        cost_matrix=(param/torch.norm(param,dim=(0,1),keepdim=True)).detach().numpy()
+        param=nn.functional.softplus(param)
+        cost_matrix=(param/ (26*torch.norm(param,dim=1,keepdim=True))).detach().numpy()
         col_ind,row_ind=LSA(cost_matrix,maximize=True)
         return cost_matrix[row_ind, col_ind].sum()
 
