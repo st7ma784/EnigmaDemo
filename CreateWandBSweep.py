@@ -5,7 +5,6 @@ wandb.login(anonymous="allow")
 if __name__=="__main__":
     sweep_config = {
         'method': 'bayes',  # Randomly sample the hyperparameter space (alternatives: grid, random)
-        'job_type': 'train',  # This is a training sweep
         'program': 'train.py',  # This is the script to be run
     
         'metric': {  # This is the metric we are interested in maximizing
