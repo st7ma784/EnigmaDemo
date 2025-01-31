@@ -71,9 +71,10 @@ class Rotor(nn.Module):
         rotationMatrix=rotationMatrix%26
         rotationMatrix=torch.nn.functional.one_hot(rotationMatrix,26).float()
         rotationMatrix=torch.add(rotationMatrix,0.01*torch.randn_like(rotationMatrix))
-        rotationMatrix=torch.matmul(rotationMatrix,(26 * self.rotor/torch.norm(self.rotor,dim=(0,1),keepdim=True)).T.unsqueeze(0)).unsqueeze(0)
+        rotationMatrix=torch.matmul(rotationMatrix,(self.rotor/torch.norm(self.rotor,dim=1,keepdim=True)).unsqueeze(0)).unsqueeze(0)
         rotationMatrix=rotationMatrix.repeat(Batch_Size,1,1,1)
         rotationMatrix=rotationMatrix.flatten(0,1)
+        rotationMatrix=rotationMatrix.permute(0,2,1) # This is the line that's different, reflecting that we're going the other direction through the rotor.
         signalInput = torch.bmm(signalInput.flatten(0,1).unsqueeze(1),rotationMatrix)
         signalInput=signalInput.squeeze(1)
         signalInput=signalInput.unflatten(0,(Batch_Size,Sequence_Length))  
@@ -93,13 +94,13 @@ class Enigma(LightningModule):
         self.precision=precision
         self.activation=activation
         self.lossName=lossName
+
         if lossName=="CrossEntropy":
             self.loss=nn.CrossEntropyLoss(reduction="mean")
         elif lossName=="MSELoss":
             self.loss=nn.MSELoss(reduction="mean")
         else:
             raise ValueError("Invalid loss function")
-
         self.R1=Rotor(1)
         self.R2=Rotor(2)
         self.R3=Rotor(3)
@@ -114,7 +115,7 @@ class Enigma(LightningModule):
             self.activation=nn.Tanh()
         else:
             raise ValueError("Invalid activation function - Addd some more activation functions")
-
+        self.save_hyperparameters()
     def configure_optimizers(self):
         params=list(self.R1.parameters()) + list(self.R2.parameters()) + list(self.R3.parameters()) + list(self.REF.parameters())
         if self.optimizer_name=="adam":
@@ -132,18 +133,24 @@ class Enigma(LightningModule):
         # Test: Do we want an activation function here?
         x=self.activation(x)
         x=self.R1(x)
+        x=self.activation(x)
 
         x=self.R2(x)
+        x=self.activation(x)
 
         x=self.R3(x)
         x=self.activation(x)
         x=self.REF(x)
+        x=self.activation(x)
 
         x=self.R1.reverse(x)
+        x=self.activation(x)
 
         x=self.R2.reverse(x)
+
         x=self.activation(x)
         x=self.R3.reverse(x)
+        x=self.activation(x)
 
 
         #Test: Do we want to do something like a softmax to force the gradient to a letter?

@@ -4,7 +4,6 @@ import pytorch_lightning as pl
 from torch.utils.data import ConcatDataset
 
 # This file is going to handle the dataset for enigma.
-
 # Our dataModule is going to have a dataset that is initialised by 3 rotors, and a reflector.
 
 class EnigmaDataModule(pl.LightningDataModule):
@@ -31,7 +30,7 @@ class EnigmaDataModule(pl.LightningDataModule):
         #This is the dataloader that will be used for training.
 
         # There are some other flags that may be worth playing with, such as num_workers, pin_memory, and prefetch_factor, what do they do?
-        return torch.utils.data.DataLoader(self.dataset,batch_size=16)
+        return torch.utils.data.DataLoader(self.dataset,batch_size=16,num_workers=4,pin_memory=True,prefetch_factor=2)
     
     def val_dataloader(self):
         return torch.utils.data.DataLoader(self.dataset,batch_size=16)
