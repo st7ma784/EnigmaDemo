@@ -47,6 +47,7 @@ class Rotor(nn.Module):
         rotationMatrix=rotationMatrix%26
         rotationMatrix=torch.nn.functional.one_hot(rotationMatrix,26).float()
         #Test - Add some noise to the rotation matrix?
+
         rotationMatrix=torch.matmul(rotationMatrix,self.rotor.unsqueeze(0)).unsqueeze(0)
 
         #Test Consider Other ways of doing this? Maybe softmax? Do methods like Gumbel softmax work here? 
@@ -132,20 +133,21 @@ class Enigma(LightningModule):
         x=self.activation(x)
 
         x=self.R1(x)
-        # x=self.R2(x)
+        x=self.R2(x)
 
-        # x=self.R3(x)
-        # x=self.REF(x)
+        x=self.R3(x)
+        x=self.REF(x)
 
-        # x=self.R1.reverse(x)
+        x=self.R1.reverse(x)
 
-        # x=self.R2.reverse(x)
+        x=self.R2.reverse(x)
 
-        # x=self.R3.reverse(x)
+        x=self.R3.reverse(x)
         # x=self.activation(x)
 
         #Test: Do we want to do something like a softmax to force the gradient to a letter?
-        x=self.softmax(x)
+        #Test: could try learning these one at a time then freezing them? 
+        # x=self.softmax(x)
         return x
     
     def training_step(self,batch,batch_idx):
