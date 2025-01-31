@@ -39,10 +39,14 @@ class Rotor(nn.Module):
         rotationMatrix=torch.add(torch.arange(26,dtype=torch.long).unsqueeze(0),self.generate_rotation_matrix(Sequence_Length).unsqueeze(1))
         #Step 2: ensure the rotation matrix is <26
         rotationMatrix=rotationMatrix%26
+        #plot the rotation matrix
         rotationMatrix=torch.nn.functional.one_hot(rotationMatrix,26).float()
-        rotationMatrix=torch.add(rotationMatrix,0.01*torch.randn_like(rotationMatrix))
+        #Test - Add some noise to the rotation matrix?
+        rotationMatrix=torch.matmul(rotationMatrix,(self.rotor/torch.norm(self.rotor,dim=(1),keepdim=True)).unsqueeze(0)).unsqueeze(0)
 
-        rotationMatrix=torch.matmul(rotationMatrix,(26 * self.rotor/torch.norm(self.rotor,dim=(0,1),keepdim=True)).unsqueeze(0)).unsqueeze(0)
+        #Test Consider Other ways of doing this? Maybe softmax? Do methods like Gumbel softmax work here?
+
+
         #shape is now (1, sequence_length,26,26)
         rotationMatrix=rotationMatrix.repeat(Batch_Size,1,1,1)
         #flatten the rotation matrix
@@ -54,6 +58,9 @@ class Rotor(nn.Module):
         # Step 4: Remove the last dimension
         signalInput=signalInput.squeeze(1)
         signalInput=signalInput.unflatten(0,(Batch_Size,Sequence_Length))  
+
+        #Test Add some sort of activation function here?
+        signalInput=torch.nn.functional.softmax(signalInput,dim=2)
         return signalInput
     
     def reverse(self,signalInput): 
@@ -97,13 +104,14 @@ class Enigma(LightningModule):
         self.R2=Rotor(2)
         self.R3=Rotor(3)
         self.REF=Rotor(0)
-
         if activation=="gelu":
             self.activation=nn.GELU()
         elif activation=="relu":
             self.activation=nn.ReLU()
         elif activation=="sigmoid":
             self.activation=nn.Sigmoid()
+        elif activation=="tanh":
+            self.activation=nn.Tanh()
         else:
             raise ValueError("Invalid activation function - Addd some more activation functions")
 
@@ -121,22 +129,22 @@ class Enigma(LightningModule):
         #To Do - See what schedulers do, and whether they are necessary. This function can return optimizers and schedulers. 
 
     def forward(self,x):
-
+        # Test: Do we want an activation function here?
+        x=self.activation(x)
         x=self.R1(x)
 
         x=self.R2(x)
 
         x=self.R3(x)
-
+        x=self.activation(x)
         x=self.REF(x)
 
         x=self.R1.reverse(x)
 
         x=self.R2.reverse(x)
-
+        x=self.activation(x)
         x=self.R3.reverse(x)
-        # Test: Do we want an activation function here?
-        # x=self.activation(x)
+
 
         #Test: Do we want to do something like a softmax to force the gradient to a letter?
         x=torch.nn.functional.softmax(x,dim=2) ##what happens if this is removed? 
@@ -244,13 +252,9 @@ if __name__ == "__main__":
     args=parser.parse_args()
     model=Enigma(args.optimizer_name,args.learning_rate,args.batch_size,args.precision,args.activation,args.loss)
     model.print_enigma_settings()
-    print("Model Created Successfully")
-    print("Model : ",model)
 
     dm=EnigmaDataModule()
     dm.setup(stage="train")
-    print("DataModule Created Successfully")
-    print("DataModule : ",dm)
    
     #login as anonymous
     wandb.login(anonymous="allow")
@@ -261,7 +265,6 @@ if __name__ == "__main__":
         monitor='Test Loss',
         patience=4,
         verbose=False,
-
         mode='min'
     )
 
