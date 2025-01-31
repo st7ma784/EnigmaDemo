@@ -130,10 +130,10 @@ class Enigma(LightningModule):
         return loss
     
     def print_enigma_settings(self):
-        print("Rotor 1 : ",self.rotor_1.max(1).indices)
-        print("Rotor 2 : ",self.rotor_2.max(1).indices)
-        print("Rotor 3 : ",self.rotor_3.max(1).indices)
-        print("Reflector : ",self.reflector)
+        print("Rotor 1 : ",self.R1.rotor.max(1).indices)
+        print("Rotor 2 : ",self.R2.rotor.max(1).indices)
+        print("Rotor 3 : ",self.R3.rotor.max(1).indices)
+        print("Reflector : ",self.REF.rotor.max(1).indices)
         print("Activation : ",self.activation)
         print("Optimizer : ",self.optimizer_name)
         print("Learning Rate : ",self.learning_rate)
