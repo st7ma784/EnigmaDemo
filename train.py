@@ -34,48 +34,44 @@ class Rotor(nn.Module):
     def generate_rotation_matrixPos1(self,sequence_length):
         return torch.arange(sequence_length,dtype=torch.long)%26
     def generate_rotation_matrixPos2(self,sequence_length):
-        return (torch.arange(sequence_length,dtype=torch.long)//26) %26
+        return (torch.arange(sequence_length,dtype=torch.long)//7) %26
     def generate_rotation_matrixPos3(self,sequence_length):
-        return (torch.arange(sequence_length,dtype=torch.long)//676) %26
+        return (torch.arange(sequence_length,dtype=torch.long)//15) %26
+    
     def forward(self,signalInput): 
         #signalInput is a tensor of shape (B,S,26) 
         Batch_Size=signalInput.shape[0]
         Sequence_Length=signalInput.shape[1]
-        #Step 1: generate the rotation matrix
-        rotationMatrix=torch.add(torch.arange(26,dtype=torch.long).unsqueeze(0),self.generate_rotation_matrix(Sequence_Length).unsqueeze(1))
-        #Step 2: ensure the rotation matrix is <26
-        rotationMatrix=rotationMatrix%26
-        rotationMatrix=torch.nn.functional.one_hot(rotationMatrix,26).float()
-        #Test - Add some noise to the rotation matrix?
-
-        rotationMatrix=torch.matmul(rotationMatrix,self.rotor.unsqueeze(0)).unsqueeze(0)
-
-        #Test Consider Other ways of doing this? Maybe softmax? Do methods like Gumbel softmax work here? 
-
-        rotationMatrix=rotationMatrix.repeat(Batch_Size,1,1,1)
-        rotationMatrix=rotationMatrix.flatten(0,1)
-        # Step 3: Apply the rotation matrix to the signal input
-        signalInput = torch.bmm(signalInput.flatten(0,1).unsqueeze(1),rotationMatrix)
-        # Step 4: Remove the last dimension
-        signalInput=signalInput.unflatten(0,(Batch_Size,Sequence_Length)).view(Batch_Size,Sequence_Length,26)
-
+        # Step 1 Build a rotation matrix, that is a tensor of shape (S,26,26) that will rotate the so that in position 1 , its identity, in position 2, it's rotated by 1, etc.
+         
+        rotationMatrix=self.generate_rotation_matrix(Sequence_Length)
+        rotationMatrix=torch.nn.functional.one_hot(rotationMatrix,26).float() # This is a tensor of shape (S,26) which, we 
+        rotationMatrix= torch.bmm(rotationMatrix.unsqueeze(2),rotationMatrix.unsqueeze(1)) 
+        # Step 2: For each value of s, [b,h]@[h,h]
+        signalInput=torch.bmm(signalInput.permute(1,0,2),rotationMatrix.permute(0,2,1)).permute(1,0,2)
+        signalInput=signalInput@self.rotor 
+        
+        
         #Test Add some sort of activation function here?
         return signalInput
     
     def reverse(self,signalInput): 
-        #signalInput is a tensor of shape (B,S,26) 
+                #signalInput is a tensor of shape (B,S,26) 
         Batch_Size=signalInput.shape[0]
         Sequence_Length=signalInput.shape[1]
-        rotationMatrix=torch.add(torch.arange(26,dtype=torch.long).unsqueeze(0),self.generate_rotation_matrix(Sequence_Length).unsqueeze(1))
-        rotationMatrix=rotationMatrix%26
+        # Step 1 Build a rotation matrix, that is a tensor of shape (S,26,26) that will rotate the so that in position 1 , its identity, in position 2, it's rotated by 1, etc.
+         
+        rotationMatrix=self.generate_rotation_matrix(Sequence_Length)
         rotationMatrix=torch.nn.functional.one_hot(rotationMatrix,26).float()
-        rotationMatrix=torch.matmul(rotationMatrix,self.rotor.unsqueeze(0)).view(1,Sequence_Length,26,26)
-        rotationMatrix=rotationMatrix.repeat(Batch_Size,1,1,1)
-        rotationMatrix=rotationMatrix.flatten(0,1)
-        rotationMatrix=rotationMatrix.permute(0,2,1) # This is the line that's different, reflecting that we're going the other direction through the rotor.
-        signalInput = torch.bmm(signalInput.flatten(0,1).unsqueeze(1),rotationMatrix)
-        signalInput=signalInput.unflatten(0,(Batch_Size,Sequence_Length)).view(Batch_Size,Sequence_Length,26)
+        rotationMatrix= torch.bmm(rotationMatrix.unsqueeze(2),rotationMatrix.unsqueeze(1)) 
 
+        # Step 2: in the batch, every item in the sequence @ the corresponding rotation matrix in the rotation matrix tensor.
+        #because we're moving the text, we need to rotate the rotor in the opposite direction, thus we need to transpose the rotor.
+        signalInput=torch.bmm(signalInput.permute(1,0,2),rotationMatrix.permute(0,2,1)).permute(1,0,2)
+        signalInput=signalInput@self.rotor.T
+        
+        
+        #Test Add some sort of activation function here?
         return signalInput
         
 
@@ -133,17 +129,26 @@ class Enigma(LightningModule):
         x=self.activation(x)
 
         x=self.R1(x)
+        x=self.activation(x)
+
         x=self.R2(x)
+        x=self.activation(x)
 
         x=self.R3(x)
+        x=self.activation(x)
+
         x=self.REF(x)
+        x=self.activation(x)
 
         x=self.R1.reverse(x)
+        x=self.activation(x)
 
         x=self.R2.reverse(x)
+        x=self.activation(x)
 
         x=self.R3.reverse(x)
         # x=self.activation(x)
+        x=self.activation(x)
 
         #Test: Do we want to do something like a softmax to force the gradient to a letter?
         #Test: could try learning these one at a time then freezing them? 
@@ -157,10 +162,9 @@ class Enigma(LightningModule):
         encoded=torch.nn.functional.one_hot(encoded,26).to(dtype=torch.float)
         encoded.requires_grad=True
         #TEST: Does adding noise help? 
-        encoded = encoded 
         decoded=self.forward(encoded)
         loss=self.loss(decoded.permute(0,2,1),GT)
-        self.log("loss",loss,prog_bar=True)
+        self.log( self.lossName,loss,prog_bar=True)
         return loss
     
     def on_train_epoch_end(self):
@@ -181,15 +185,20 @@ class Enigma(LightningModule):
 
     def compare_to_gt(self,rotors,reflector):
         #This function will take a batch of ground truth rotors and reflectors, and compare them to the current settings.
-        rotor1Loss=torch.nn.functional.cross_entropy(self.R1.rotor/torch.norm(self.R1.rotor,dim=(0,1),keepdim=True),rotors[0]) 
-        rotor2Loss=torch.nn.functional.cross_entropy(self.R2.rotor/torch.norm(self.R2.rotor,dim=(0,1),keepdim=True),rotors[1])
-        rotor3Loss=torch.nn.functional.cross_entropy(self.R3.rotor/torch.norm(self.R3.rotor,dim=(0,1),keepdim=True),rotors[2])
+        rotor1Loss=torch.nn.functional.cross_entropy(self.R1.rotor/torch.norm(self.R1.rotor,dim=(1),keepdim=True),rotors[0]) 
+        rotor2Loss=torch.nn.functional.cross_entropy(self.R2.rotor/torch.norm(self.R2.rotor,dim=(1),keepdim=True),rotors[1])
+        rotor3Loss=torch.nn.functional.cross_entropy(self.R3.rotor/torch.norm(self.R3.rotor,dim=(1),keepdim=True),rotors[2])
         reflectorLoss=torch.nn.functional.cross_entropy(self.REF.rotor/torch.norm(self.REF.rotor,dim=(0,1),keepdim=True),reflector)
-        self.log("Rotor 1 Loss",rotor1Loss, prog_bar=True)
-        self.log("Rotor 2 Loss",rotor2Loss, prog_bar=True) 
-        self.log("Rotor 3 Loss",rotor3Loss, prog_bar=True)
-        self.log("Reflector Loss",reflectorLoss, prog_bar=True)
-        self.log("Test Loss",(rotor1Loss+rotor2Loss+rotor3Loss+reflectorLoss)/4,prog_bar=True)
+        rotor1LossT=torch.nn.functional.cross_entropy(self.R1.rotor.T/torch.norm(self.R1.rotor,dim=(1),keepdim=True),rotors[0]) 
+        rotor2LossT=torch.nn.functional.cross_entropy(self.R2.rotor.T/torch.norm(self.R2.rotor,dim=(1),keepdim=True),rotors[1])
+        rotor3LossT=torch.nn.functional.cross_entropy(self.R3.rotor.T/torch.norm(self.R3.rotor,dim=(1),keepdim=True),rotors[2])
+        reflectorLossT=torch.nn.functional.cross_entropy(self.REF.rotor.T/torch.norm(self.REF.rotor,dim=(0,1),keepdim=True),reflector)
+        TestLoss=(min(rotor1Loss.item(),rotor1LossT.item())+min(rotor2Loss.item(),rotor2LossT.item())+min(rotor3Loss.item(),rotor3LossT.item())+min(reflectorLoss.item(),reflectorLossT.item()))/4
+        self.log("Rotor 1 Loss",min(rotor1Loss.item(),rotor1LossT.item()))
+        self.log("Rotor 2 Loss",min(rotor2Loss.item(),rotor2LossT.item()))
+        self.log("Rotor 3 Loss",min(rotor3Loss.item(),rotor3LossT.item()))
+        self.log("Reflector Loss",min(reflectorLoss.item(),reflectorLossT.item()))
+        self.log("Test Loss",TestLoss, prog_bar=True)
         #use imshow to display the rotors and reflectors
         fig=plt.figure()
         ax1=fig.add_subplot(221)
@@ -205,25 +214,20 @@ class Enigma(LightningModule):
         ax4.imshow(self.REF.rotor.detach().numpy())
         ax4.set_title("Reflector")
         #save to figure and log it
-        fig.savefig("Rotors.png")
+        fig.savefig("Rotors.currentEpoch{}.TestLoss{}.png".format(self.current_epoch,TestLoss))
         plt.close(fig)
-        LSA_score=self.convertParametertoConfidence(self.R1.rotor)
-        self.log("Rotor 1 Confidence",LSA_score)
-        LSA_score=self.convertParametertoConfidence(self.R2.rotor)
-        self.log("Rotor 2 Confidence",LSA_score)
-        LSA_score=self.convertParametertoConfidence(self.R3.rotor)
-        self.log("Rotor 3 Confidence",LSA_score)
-        LSA_score=self.convertParametertoConfidence(self.REF.rotor)
-        self.log("Reflector Confidence",LSA_score)     
-        return rotor1Loss,rotor2Loss,rotor3Loss,reflectorLoss
+        self.LogParametertoConfidence("Rotor 1 Confidence", self.R1.rotor)
+        self.LogParametertoConfidence("Rotor 2 Confidence", self.R2.rotor)
+        self.LogParametertoConfidence("Rotor 3 Confidence", self.R3.rotor)
+        self.LogParametertoConfidence("Reflector Confidence", self.REF.rotor)
 
 
-    def convertParametertoConfidence(self, param):
+    def LogParametertoConfidence(self, name,param):
         #This function will take a tensor of shape (26,26) and convert it to a tensor of shape (26,26) where each row is a probability distribution.
         param=nn.functional.softplus(param)
         cost_matrix=(param/ (26*torch.norm(param,dim=1,keepdim=True))).detach().numpy()
         col_ind,row_ind=LSA(cost_matrix,maximize=True)
-        return cost_matrix[row_ind, col_ind].sum()
+        self.log(name,cost_matrix[row_ind, col_ind].sum())
 
 
 if __name__ == "__main__":
@@ -251,6 +255,8 @@ if __name__ == "__main__":
     wandb.login(anonymous="allow")
     wandb_logger = WandbLogger(project='Enigma', entity='st7ma784')
 
+    #And finally a nice loading bar
+    progress_bar = pl.callbacks.TQDMProgressBar()
     #enable Early stopping
     early_stop_callback = pl.callbacks.EarlyStopping(
         monitor='Test Loss',
@@ -268,8 +274,6 @@ if __name__ == "__main__":
     #     mode='min',
     # )
 
-    #And finally a nice loading bar
-    progress_bar = pl.callbacks.TQDMProgressBar()
 
 
     trainer=pl.Trainer(max_epochs=500,

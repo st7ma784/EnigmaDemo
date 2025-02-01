@@ -62,11 +62,9 @@ class EnigmaDataset(torch.utils.data.IterableDataset):
         rotor_positions=[0,0,0]
         for i in range(150):
             #Rotate the rotors
-            rotor_positions[0]=(rotor_positions[0]+1)%26
-            if rotor_positions[0]==0:
-                rotor_positions[1]=(rotor_positions[1]+1)%26
-                if rotor_positions[1]==0:
-                    rotor_positions[2]=(rotor_positions[2]+1)%26
+            rotor_positions[0]=(i)%26
+            rotor_positions[1]=(i//7)%26
+            rotor_positions[2]=(i//15)%26
             #Encode the letter
             letterAfterFirstRotor= self.rotors[0][(rotor_positions[0]+encoded[i])%26]
             letterAfterSecondRotor= self.rotors[1][(rotor_positions[1] + letterAfterFirstRotor)%26]
