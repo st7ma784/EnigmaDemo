@@ -57,14 +57,14 @@ class EnigmaDataset(torch.utils.data.IterableDataset):
         #This is the logic for the enigma machine
         #We will generate a sequence of 50 random letters, then encode it.
 
-        GROUND_TRUTH= torch.randint(0,26,(150,),dtype=torch.long)
+        GROUND_TRUTH= torch.randint(0,26,(11*26,),dtype=torch.long)
         encoded=GROUND_TRUTH.clone()
         rotor_positions=[0,0,0]
-        for i in range(150):
+        for i in range(11*26):
             #Rotate the rotors
             rotor_positions[0]=(i)%26
             rotor_positions[1]=(i//7)%26
-            rotor_positions[2]=(i//15)%26
+            rotor_positions[2]=(i//11)%26
             #Encode the letter
             letterAfterFirstRotor= self.rotors[0][(rotor_positions[0]+encoded[i])%26]
             letterAfterSecondRotor= self.rotors[1][(rotor_positions[1] + letterAfterFirstRotor)%26]
