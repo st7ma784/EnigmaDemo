@@ -90,11 +90,11 @@ for LRi in range(len(LRs)):
 #find the smallest loss
 minLoss=torch.min(results)
 print(minLoss)
-#find the index of the smallest loss
-# find the coords of the smallest loss
-coords = np.argwhere(results == minLoss)
-print(coords)
-#find the best parameters
+#find the x,y,z,w,v,u values of the minloss location in the array
+minLossLocation=torch.argmin(results.flatten(0,-1))
 
+coords=torch.unravel_index(minLossLocation, results.shape)
+best_settings=[LRs[coords[0]], noises[coords[1]], taus[coords[2]], n_iters[coords[3]], scale[coords[4]], Loss_methods[coords[5]]]
+print(best_settings)
 
 
