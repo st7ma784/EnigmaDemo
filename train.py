@@ -14,6 +14,22 @@ from scipy.optimize import linear_sum_assignment as LSA
 #             A better walkthrough of the ideas are here : https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/DL2/sampling/permutations.html
 
 
+def RotorHook(self, input, output):
+    #This function will be called whenever the rotor is called. 
+    #We will use this to add noise to the rotor. 
+    fig=plt.figure()
+    ax1=fig.add_subplot(131)
+    ax1.imshow(input[0][0].cpu().detach().numpy())
+    ax1.set_title("input")
+    ax2=fig.add_subplot(132)
+    ax2.imshow(self.rotor.cpu().detach().numpy())
+    ax2.set_title("Rotor")
+    ax3=fig.add_subplot(133)
+    ax3.imshow(output[0].cpu().detach().numpy())
+    ax3.set_title("Output")
+    fig.savefig("RotorHookPosition{}.png".format(self.position))
+    plt.close(fig)
+
 class RotorBase(LightningModule):
     def __init__(self,position=1):
         super().__init__()
@@ -30,40 +46,45 @@ class RotorBase(LightningModule):
             raise ValueError("Invalid rotor position")
         self.rotor=nn.parameter.Parameter(torch.rand(26,26),requires_grad=True)
         nn.init.xavier_normal_(self.rotor) 
-        self.rotor.data=self.rotor.data/torch.norm(self.rotor.data,dim=1,keepdim=True) 
-
+        self.rotor.data=self.rotor.data/torch.norm(self.rotor.data,dim=1,keepdim=True)
+        self.matrix=self.matrixFwd 
+        
+    def rotorForward(self):
+        self.matrix=self.matrixFwd
+    def rotorReverse(self):
+        self.matrix=self.matrixRvs
     def getWeight(self):
         return self.rotor.to(self.device)
+    
     def generate_rotation_matrixPos0(self,sequence_length):
         return torch.zeros(sequence_length,dtype=torch.long)
     def generate_rotation_matrixPos1(self,sequence_length):
         return torch.arange(sequence_length,dtype=torch.long)%26
     def generate_rotation_matrixPos2(self,sequence_length):
-        return (torch.arange(sequence_length,dtype=torch.long)//7) %26
+        return (torch.arange(sequence_length)//7)%26
     def generate_rotation_matrixPos3(self,sequence_length):
-        return (torch.arange(sequence_length,dtype=torch.long)//11) %26
+        return (torch.arange(sequence_length)//11)%26
 
-    def make_rotation_matrix(self,signalInput):
+
+    def forward(self,signalInput):
         Sequence_Length=signalInput.shape[1]
         # Step 1 Build a rotation matrix, that is a tensor of shape (S,26,26) that will rotate the so that in position 1 , its identity, in position 2, it's rotated by 1, etc.
-        rotationMatrix=self.generate_rotation_matrix(Sequence_Length)
-        rotationMatrix=torch.nn.functional.one_hot(rotationMatrix,26).float().to(self.device) # This is a tensor of shape (S,26) which, we 
-        rotationMatrix= torch.bmm(rotationMatrix.unsqueeze(2),rotationMatrix.unsqueeze(1)) 
-        # Step 2: For each value of s, [b,h]@[h,h]
-        return torch.bmm(signalInput.permute(1,0,2),rotationMatrix.permute(0,2,1)).permute(1,0,2)
-        
-    def forward(self,signalInput): 
-        signalInput=self.make_rotation_matrix(signalInput)
-        signalInput=signalInput@(self.rotor)
-        #Test Add some sort of activation function here?
-        return signalInput
+        rotationMatrix=self.generate_rotation_matrix(Sequence_Length).unsqueeze(1)
+        Base=torch.arange(26).unsqueeze(0).repeat(Sequence_Length,1)
+        rotationMatrix=torch.add(Base,rotationMatrix)%26
+        rotationMatrix=torch.nn.functional.one_hot(rotationMatrix,26).float()
+        # rotationMatrix is shape sequence_length,26,26
+        rotationMatrix=rotationMatrix@self.matrix()
+        #[sbh]@shh = [sbh]
+        return torch.bmm(signalInput.permute(1,0,2),rotationMatrix).permute(1,0,2)
     
-    def reverse(self,signalInput): 
-        signalInput=self.make_rotation_matrix(signalInput)
-        signalInput=signalInput@(self.rotor.T)
-        #Test Add some sort of activation function here?
-        return signalInput
-
+    def matrixFwd(self):
+        return self.rotor
+    def matrixRvs(self):
+        return self.rotor.T
+    
+ 
+    
 class Enigma(LightningModule):
 
     def __init__(self,optimizer_name,learning_rate,batch_size,precision,activation,lossName="CrossEntropy"):
@@ -105,10 +126,6 @@ class Enigma(LightningModule):
         self.R2=RotorBase(2)
         self.R3=RotorBase(3)
         self.REF=RotorBase(0)
-        #move all the rotors to the device
-
-        #make sure these are all on device! 
-
         self.softmax=nn.Softmax(dim=2)
 
         self.save_hyperparameters()
@@ -132,16 +149,30 @@ class Enigma(LightningModule):
     def processNullLabels(self,labels):
         return labels
     
+    def reverseRotors(self):
+        self.R1.rotorReverse()
+        self.R2.rotorReverse()
+        self.R3.rotorReverse()
+    
+    def forwardRotors(self):
+        self.R1.rotorForward()
+        self.R2.rotorForward()
+        self.R3.rotorForward()
+
     def forward(self,x):
         # Test: Do we want an activation function here?
+        self.forwardRotors()
         x=self.R1(x)
         x=self.R2(x)
         x=self.R3(x)
+        #check if x all zeros
+        self.reverseRotors()
+        #check if x all zeros
         x=self.REF(x)
-        x=self.R1.reverse(x)
-        x=self.R2.reverse(x)
-        x=self.R3.reverse(x)
-        x=self.softmax(x)
+        x=self.R3(x)
+        x=self.R2(x)
+        x=self.R1(x)
+
         #Test: Do we want to do something like a softmax to force the gradient to a letter?
         #Test: could try learning these one at a time then freezing them? 
         return x
@@ -149,22 +180,16 @@ class Enigma(LightningModule):
     def training_step(self,batch,batch_idx):
         encoded,GT=batch #GT is the ground truth     -though the elegance of the enigma machine is that these can be the other way around and it will still work. 
         GT=self.process(GT).to(self.device)
-        
-        encoded=torch.nn.functional.one_hot(encoded,26,).to(dtype=torch.float)
         encoded=encoded.to(self.device)
-
-        encoded.requires_grad=True
+        encoded=torch.nn.functional.one_hot(encoded,26,).to(dtype=torch.float)
         #TEST: Does adding noise help? 
         decoded=self.forward(encoded) 
         loss=self.loss(decoded.permute(0,2,1),GT)
-
-        #Test: Do we want to add a loss for the rotors and reflectors? Maybe a cross entropy loss? How about using the norms of the matrices?
         self.log( self.lossName,loss,prog_bar=True)
         return loss
     
     def on_train_epoch_end(self):
         self.compare_to_gt(self.trainer.datamodule.dataset.rotors,self.trainer.datamodule.dataset.reflector)
-
 
     def print_enigma_settings(self):
         print("Rotor 1 : ",self.R1.getWeight().max(1).indices)
@@ -261,6 +286,7 @@ if __name__ == "__main__":
     parser.add_argument("--precision",type=str,default="32")
     parser.add_argument("--activation",type=str,default="gelu")
     parser.add_argument("--loss",type=str,default="MSELoss")
+    parser.add_argument("--debug",action="store_true")
     args=parser.parse_args()
     model=Enigma(args.optimizer_name,args.learning_rate,args.batch_size,args.precision,args.activation,args.loss)
     model.print_enigma_settings()
@@ -291,9 +317,34 @@ if __name__ == "__main__":
     #     mode='min',
     # )
 
-
-
-    trainer=pl.Trainer(max_epochs=500,
+    if args.debug:
+        trainer=pl.Trainer(fast_dev_run=True,
+                        logger=wandb_logger,
+                        callbacks=[early_stop_callback,progress_bar])
+        model.R1.rotor.data=torch.nn.functional.one_hot(dm.rotors[0]).float()
+        model.R1.register_forward_hook(RotorHook)
+        model.R2.rotor.data=torch.nn.functional.one_hot(dm.rotors[1]).float()
+        model.R2.register_forward_hook(RotorHook)
+        model.R3.rotor.data=torch.nn.functional.one_hot(dm.rotors[2]).float()
+        model.R3.register_forward_hook(RotorHook)
+        model.REF.rotor.data=torch.nn.functional.one_hot(dm.reflector).float()
+        model.REF.register_forward_hook(RotorHook)
+        input=torch.randint(0,26,(1,150),dtype=torch.long)
+        input=torch.nn.functional.one_hot(input,26).float()
+        output=model(input)
+        output2=model(output)
+        if not torch.allclose(input,output2):
+            print("Enigma Machine is not working")
+            fig=plt.figure()
+            ax1=fig.add_subplot(131)
+            ax1.imshow(input[0].cpu().detach().numpy())
+            ax2=fig.add_subplot(132)
+            ax2.imshow(output2[0].cpu().detach().numpy())
+            ax3=fig.add_subplot(133)
+            ax3.imshow(output[0].cpu().detach().numpy())
+            fig.savefig("EnigmaTest.png")
+    else:
+        trainer=pl.Trainer(max_epochs=500,
                        max_steps=30000,
                         devices="auto",
                         accelerator="auto",
