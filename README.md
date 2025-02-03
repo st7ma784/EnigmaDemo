@@ -22,6 +22,31 @@ From a random setting of our data, can we use a neural network or Linear Algebra
 
 ## QUICK START: 
 
+### Step Zero: Set up env 
+
+To set up a virtual environment and install the required packages with pip, follow these steps:
+
+1. **Create a virtual environment**:
+  ```bash
+  python3 -m venv env
+  ```
+
+2. **Activate the virtual environment**:
+  - On Windows:
+    ```bash
+    .\env\Scripts\activate
+    ```
+  - On macOS and Linux:
+    ```bash
+    source env/bin/activate
+    ```
+
+3. **Install the required packages**:
+  ```bash
+  pip install -r requirements.txt
+  ```
+
+
 ### Step one: 
   - Put your dataset into the DataModule.py file.
   - This details how to load your data onto the server. An example is given for Enigma, generating a random encoding.
