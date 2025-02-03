@@ -14,7 +14,7 @@ from scipy.optimize import linear_sum_assignment as LSA
 #             A better walkthrough of the ideas are here : https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/DL2/sampling/permutations.html
 
 
-class RotorBase(nn.Module):
+class RotorBase(LightningModule):
     def __init__(self,position=1):
         super().__init__()
         self.position=position
@@ -33,7 +33,7 @@ class RotorBase(nn.Module):
         self.rotor.data=self.rotor.data/torch.norm(self.rotor.data,dim=1,keepdim=True) 
 
     def getWeight(self):
-        return self.rotor
+        return self.rotor.to(self.device)
     def generate_rotation_matrixPos0(self,sequence_length):
         return torch.zeros(sequence_length,dtype=torch.long)
     def generate_rotation_matrixPos1(self,sequence_length):
@@ -47,7 +47,7 @@ class RotorBase(nn.Module):
         Sequence_Length=signalInput.shape[1]
         # Step 1 Build a rotation matrix, that is a tensor of shape (S,26,26) that will rotate the so that in position 1 , its identity, in position 2, it's rotated by 1, etc.
         rotationMatrix=self.generate_rotation_matrix(Sequence_Length)
-        rotationMatrix=torch.nn.functional.one_hot(rotationMatrix,26).float() # This is a tensor of shape (S,26) which, we 
+        rotationMatrix=torch.nn.functional.one_hot(rotationMatrix,26).float().to(self.device) # This is a tensor of shape (S,26) which, we 
         rotationMatrix= torch.bmm(rotationMatrix.unsqueeze(2),rotationMatrix.unsqueeze(1)) 
         # Step 2: For each value of s, [b,h]@[h,h]
         return torch.bmm(signalInput.permute(1,0,2),rotationMatrix.permute(0,2,1)).permute(1,0,2)
@@ -105,8 +105,12 @@ class Enigma(LightningModule):
         self.R2=RotorBase(2)
         self.R3=RotorBase(3)
         self.REF=RotorBase(0)
+        #move all the rotors to the device
+
+        #make sure these are all on device! 
+
         self.softmax=nn.Softmax(dim=2)
-        
+
         self.save_hyperparameters()
     def configure_optimizers(self):
         params=list(self.R1.parameters()) + list(self.R2.parameters()) + list(self.R3.parameters()) + list(self.REF.parameters())
@@ -144,9 +148,11 @@ class Enigma(LightningModule):
     
     def training_step(self,batch,batch_idx):
         encoded,GT=batch #GT is the ground truth     -though the elegance of the enigma machine is that these can be the other way around and it will still work. 
-        GT=self.process(GT)
+        GT=self.process(GT).to(self.device)
         
-        encoded=torch.nn.functional.one_hot(encoded,26).to(dtype=torch.float)
+        encoded=torch.nn.functional.one_hot(encoded,26,).to(dtype=torch.float)
+        encoded=encoded.to(self.device)
+
         encoded.requires_grad=True
         #TEST: Does adding noise help? 
         decoded=self.forward(encoded) 
@@ -174,14 +180,14 @@ class Enigma(LightningModule):
 
     def compare_to_gt(self,rotors,reflector):
         #This function will take a batch of ground truth rotors and reflectors, and compare them to the current settings.
-        rotor1Loss=torch.nn.functional.cross_entropy(self.R1.getWeight()/torch.norm(self.R1.getWeight(),dim=(1),keepdim=True),rotors[0]) 
-        rotor2Loss=torch.nn.functional.cross_entropy(self.R2.getWeight()/torch.norm(self.R2.getWeight(),dim=(1),keepdim=True),rotors[1])
-        rotor3Loss=torch.nn.functional.cross_entropy(self.R3.getWeight()/torch.norm(self.R3.getWeight(),dim=(1),keepdim=True),rotors[2])
-        reflectorLoss=torch.nn.functional.cross_entropy(self.REF.getWeight()/torch.norm(self.REF.getWeight(),dim=(0,1),keepdim=True),reflector)
-        rotor1LossT=torch.nn.functional.cross_entropy(self.R1.getWeight().T/torch.norm(self.R1.getWeight(),dim=(1),keepdim=True),rotors[0]) 
-        rotor2LossT=torch.nn.functional.cross_entropy(self.R2.getWeight().T/torch.norm(self.R2.getWeight(),dim=(1),keepdim=True),rotors[1])
-        rotor3LossT=torch.nn.functional.cross_entropy(self.R3.getWeight().T/torch.norm(self.R3.getWeight(),dim=(1),keepdim=True),rotors[2])
-        reflectorLossT=torch.nn.functional.cross_entropy(self.REF.getWeight().T/torch.norm(self.REF.getWeight(),dim=(0,1),keepdim=True),reflector)
+        rotor1Loss=torch.nn.functional.cross_entropy(self.R1.getWeight()/torch.norm(self.R1.getWeight(),dim=(1),keepdim=True),rotors[0].to(self.device)) 
+        rotor2Loss=torch.nn.functional.cross_entropy(self.R2.getWeight()/torch.norm(self.R2.getWeight(),dim=(1),keepdim=True),rotors[1].to(self.device))
+        rotor3Loss=torch.nn.functional.cross_entropy(self.R3.getWeight()/torch.norm(self.R3.getWeight(),dim=(1),keepdim=True),rotors[2].to(self.device))
+        reflectorLoss=torch.nn.functional.cross_entropy(self.REF.getWeight()/torch.norm(self.REF.getWeight(),dim=(0,1),keepdim=True),reflector.to(self.device))
+        rotor1LossT=torch.nn.functional.cross_entropy(self.R1.getWeight().T/torch.norm(self.R1.getWeight(),dim=(1),keepdim=True),rotors[0].to(self.device)) 
+        rotor2LossT=torch.nn.functional.cross_entropy(self.R2.getWeight().T/torch.norm(self.R2.getWeight(),dim=(1),keepdim=True),rotors[1].to(self.device))
+        rotor3LossT=torch.nn.functional.cross_entropy(self.R3.getWeight().T/torch.norm(self.R3.getWeight(),dim=(1),keepdim=True),rotors[2].to(self.device))
+        reflectorLossT=torch.nn.functional.cross_entropy(self.REF.getWeight().T/torch.norm(self.REF.getWeight(),dim=(0,1),keepdim=True),reflector.to(self.device))
         TestLoss=(min(rotor1Loss.item(),rotor1LossT.item())+min(rotor2Loss.item(),rotor2LossT.item())+min(rotor3Loss.item(),rotor3LossT.item())+min(reflectorLoss.item(),reflectorLossT.item()))/4
         self.log("Rotor 1 Loss",min(rotor1Loss.item(),rotor1LossT.item()))
         self.log("Rotor 2 Loss",min(rotor2Loss.item(),rotor2LossT.item()))
@@ -191,22 +197,22 @@ class Enigma(LightningModule):
         #use imshow to display the rotors and reflectors
         fig=plt.figure()
         ax1=fig.add_subplot(241)
-        ax1.imshow(self.R1.getWeight().detach().numpy())
+        ax1.imshow(self.R1.getWeight().detach().cpu().numpy())
         ax2=fig.add_subplot(242)
-        ax2.imshow(self.R2.getWeight().detach().numpy())
+        ax2.imshow(self.R2.getWeight().detach().cpu().numpy())
         ax3=fig.add_subplot(243)
-        ax3.imshow(self.R3.getWeight().detach().numpy())
+        ax3.imshow(self.R3.getWeight().detach().cpu().numpy())
         ax4=fig.add_subplot(244)
-        ax4.imshow(self.REF.getWeight().detach().numpy())
+        ax4.imshow(self.REF.getWeight().detach().cpu().numpy())
         #plot original rotors
         ax5=fig.add_subplot(245)
-        ax5.imshow(torch.nn.functional.one_hot(rotors[0]).detach().numpy())
+        ax5.imshow(torch.nn.functional.one_hot(rotors[0]).detach().cpu().numpy())
         ax6=fig.add_subplot(246)
-        ax6.imshow(torch.nn.functional.one_hot(rotors[1]).detach().numpy())
+        ax6.imshow(torch.nn.functional.one_hot(rotors[1]).detach().cpu().numpy())
         ax7=fig.add_subplot(247)
-        ax7.imshow(torch.nn.functional.one_hot(rotors[2]).detach().numpy())
+        ax7.imshow(torch.nn.functional.one_hot(rotors[2]).detach().cpu().numpy())
         ax8=fig.add_subplot(248)
-        ax8.imshow(torch.nn.functional.one_hot(reflector).detach().numpy())
+        ax8.imshow(torch.nn.functional.one_hot(reflector).detach().cpu().numpy())
 
         ax1.set_title("Rotor 1") 
         ax2.set_title("Rotor 2")
@@ -225,6 +231,7 @@ class Enigma(LightningModule):
         ax6.axis("off")
         ax7.axis("off")
         ax8.axis("off")
+
         fig.savefig("Rotors.currentEpoch{}.TestLoss{}.png".format(self.current_epoch,TestLoss))
         plt.close(fig)
         self.LogParametertoConfidence("Rotor 1 Confidence", self.R1.getWeight())
@@ -235,7 +242,7 @@ class Enigma(LightningModule):
 
     def LogParametertoConfidence(self, name,param):
         #This function will take a tensor of shape (26,26) and convert it to a tensor of shape (26,26) where each row is a probability distribution.
-        cost_matrix=(param/ (26*torch.norm(param,dim=1,keepdim=True))).detach().numpy()
+        cost_matrix=(param/ (26*torch.norm(param,dim=1,keepdim=True))).cpu().detach().numpy()
         col_ind,row_ind=LSA(cost_matrix,maximize=True)
         self.log(name,cost_matrix[row_ind, col_ind].sum())
 
