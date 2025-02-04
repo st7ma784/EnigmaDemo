@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  enigma-demo:
+    image: st7ma784/enigma-demo
+    container_name: enigma-demo
+    ports:
+      - "8080:8080"
+    restart: always
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: always
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=300

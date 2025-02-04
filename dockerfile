@@ -5,7 +5,7 @@ FROM pytorch/pytorch:latest
 COPY requirements.txt /app/requirements.txt
 
 # Install the Python dependencies
-RUN pip install -r /app/requirements.txt
+RUN pip install -r /app/requirements.txt --no-cache-dir
 
 # Set the working directory
 WORKDIR /app

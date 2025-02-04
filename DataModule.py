@@ -64,9 +64,6 @@ class EnigmaDataset(torch.utils.data.IterableDataset):
         # make these into 2d arrays with one_hot encoding
         self.rotors=rotors
         self.reflector=reflector
-        rotateMatrix=torch.arange(26)+1 #This is the matrix that will be used to rotate the rotors.
-        rotateMatrix[-1]=0
-        self.rotateMatrix=torch.nn.functional.one_hot(rotateMatrix,26)
     def __iter__(self):
         return self
     def __len__(self):

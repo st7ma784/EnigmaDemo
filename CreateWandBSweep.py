@@ -24,6 +24,15 @@ if __name__=="__main__":
             'activation':{
                 'values': ['gelu','relu','tanh','sigmoid']
             },
+            "gs_tau":{
+                "values":[0.01, 0.03, 0.05, 0.1, 0.5]
+            },
+            "gs_n_iter":{
+                "values":[1,10,50,100,500]
+            },
+            "gs_noise_factor":{
+                "values":[0,0.2,0.4,0.6,0.8]
+            },
             "optimizer_name":{
                 "values":["adam","sgd"]
             },
