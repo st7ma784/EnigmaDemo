@@ -14,4 +14,4 @@ WORKDIR /app
 COPY . /app
 
 # Run the launch command with the num_trials -1 flag
-CMD ["python", "train.py"]
+CMD ["python", "CreateWandBSweep.py"]
