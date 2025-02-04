@@ -172,6 +172,7 @@ class Enigma(LightningModule):
         #TEST: Does adding noise help? 
         decoded=self.forward(encoded) 
         loss=self.loss(decoded.permute(0,2,1),GT)
+        self.log(self.lossName,loss,prog_bar=True)
         #L1 Loss will be the rowwise sum of the rotors.
         #L2 will be the rowwise sum of the square of the rotors.
         # L2=torch.abs(1-torch.norm(self.R1.getWeight(),dim=(1),keepdim=True).mean()) + torch.abs(1-torch.norm(self.R2.getWeight(),dim=(1),keepdim=True).mean()) + torch.abs(1-torch.norm(self.R3.getWeight(),dim=(1),keepdim=True).mean()) + torch.abs(1-torch.norm(self.REF.getWeight(),dim=(0),keepdim=True).mean())
