@@ -42,10 +42,21 @@ class RotorBase(LightningModule):
         self.gs_n_iter=gs_n_iter
         self.gs_noise_factor=gs_noise_factor
         self.Base=torch.arange(26).unsqueeze(0)
-
+        self.ProcessPermute=self.ForwardMatrix
+        if self.gs_n_iter==0:
+            self.getrotor=self.Rotor
+        else :
+            self.getrotor=self.GSRotor
+    def rotorForward(self):
+        self.ProcessPermute=self.ForwardMatrix
+    def rotorReverse(self):
+        self.ProcessPermute=self.ReverseMatrix
     def getWeight(self):
         return self.rotor.to(self.device)
-    
+    def ReverseMatrix(self,x):
+        return x.permute(0,2,1)
+    def ForwardMatrix(self,x):
+        return x
     def generate_rotation_matrixPos0(self,sequence_length):
         return torch.zeros(sequence_length,dtype=torch.long)
     def generate_rotation_matrixPos1(self,sequence_length):
@@ -54,18 +65,20 @@ class RotorBase(LightningModule):
         return torch.remainder(torch.arange(sequence_length,dtype=torch.long)//7,26)
     def generate_rotation_matrixPos3(self,sequence_length):
         return torch.remainder(torch.arange(sequence_length,dtype=torch.long)//11,26)
-
-    def forward(self,signalInput,reverse=False):
+    def Rotor(self):
+        return self.rotor
+    def GSRotor(self):
+        self.rotor.data=gumbel_sinkhorn(self.rotor.data,self.gs_tau,self.gs_n_iter,self.gs_noise_factor)
+    def forward(self,signalInput):
         Sequence_Length=signalInput.shape[1]
         # Step 1 Build a rotation matrix, that is a tensor of shape (S,26,26) that will rotate the so that in position 1 , its identity, in position 2, it's rotated by 1, etc.
         rotationMatrix=self.generate_rotation_matrix(Sequence_Length).unsqueeze(1)
         rotationMatrix=torch.remainder(torch.add(rotationMatrix,self.Base),26)
         positionRotorMatrix=torch.nn.functional.one_hot(rotationMatrix,26).to(torch.float) #this is an offset identity matrix of shape (S,26,26)
         # Step 2: Multiply the rotor by the offset identity matrix
-        positionRotorMatrix=positionRotorMatrix@self.rotor #this should be s,26,26
+        positionRotorMatrix=positionRotorMatrix@self.getrotor() #this should be s,26,26
         # Step 3: Multiply the signal by the position rotor matrix
-        if reverse:
-            positionRotorMatrix=positionRotorMatrix.permute(0,2,1)
+        positionRotorMatrix=self.ProcessPermute(positionRotorMatrix)
         signalOutput=torch.bmm(signalInput.permute(1,0,2),positionRotorMatrix).permute(1,0,2)
         return signalOutput
     
@@ -152,14 +165,16 @@ class Enigma(LightningModule):
 
     def forward(self,x):
         # Test: Do we want an activation function here?
+        self.forwardRotors()
         x=self.R1(x)
         x=self.R2(x)
         x=self.R3(x)
         x=self.REF(x)
-        x=self.R3(x,reverse=True)
-        x=self.R2(x,reverse=True)
-        x=self.R1(x,reverse=True)
-        
+        self.reverseRotors()
+        x=self.R3(x)
+        x=self.R2(x)
+        x=self.R1(x)
+        x=self.softmax(x)
         #Test: Do we want to do something like a softmax to force the gradient to a letter?
         #Test: could try learning these one at a time then freezing them? 
         return x
