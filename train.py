@@ -68,7 +68,7 @@ class RotorBase(LightningModule):
     def Rotor(self):
         return self.rotor
     def GSRotor(self):
-        return gumbel_sinkhorn(self.rotor.data,self.gs_tau,self.gs_n_iter,self.gs_noise_factor)
+        return gumbel_sinkhorn(self.rotor,self.gs_tau,self.gs_n_iter,self.gs_noise_factor)
     def forward(self,signalInput):
         Sequence_Length=signalInput.shape[1]
         # Step 1 Build a rotation matrix, that is a tensor of shape (S,26,26) that will rotate the so that in position 1 , its identity, in position 2, it's rotated by 1, etc.
