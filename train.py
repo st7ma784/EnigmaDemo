@@ -171,17 +171,23 @@ class Enigma(LightningModule):
         x=self.R1(x)
         x=self.activation(x)
         x=self.R2(x)
+        x=self.activation(x)
+
         x=self.R3(x)
         x=self.activation(x)
         x=self.REF(x)
         self.reverseRotors()
+        x=self.activation(x)
         x=self.R3(x)
         x=self.activation(x)
         x=self.R2(x)
+        x=self.activation(x)
         x=self.R1(x)
         x=self.softmax(x)
+
         #Test: Do we want to do something like a softmax to force the gradient to a letter?
         #Test: could try learning these one at a time then freezing them? 
+
         return x
     
     def training_step(self,batch,batch_idx):
@@ -195,31 +201,13 @@ class Enigma(LightningModule):
         self.log(self.lossName,loss,prog_bar=True)
         #L1 Loss will be the rowwise sum of the rotors.
         #L2 will be the rowwise sum of the square of the rotors.
-        L2=torch.abs(1-torch.norm(self.R1.getWeight(),dim=(1),keepdim=True).mean()) + torch.abs(1-torch.norm(self.R2.getWeight(),dim=(1),keepdim=True).mean()) + torch.abs(1-torch.norm(self.R3.getWeight(),dim=(1),keepdim=True).mean()) + torch.abs(1-torch.norm(self.REF.getWeight(),dim=(0),keepdim=True).mean())
-        L2=L2/4
-        self.log("L2Loss", torch.abs(1-L2))
-        L1=torch.abs(1-torch.norm(self.R1.getWeight(),p=1,dim=(1),keepdim=True).mean()) + torch.abs(1-torch.norm(self.R2.getWeight(),p=1,dim=(1),keepdim=True).mean()) + torch.abs(1-torch.norm(self.R3.getWeight(),p=1,dim=(1),keepdim=True).mean()) + torch.abs(1-torch.norm(self.REF.getWeight(),p=1,dim=(0),keepdim=True).mean())
-        L1=L1/4
-        self.log("L1Loss", torch.abs(1-L1))
-
-        '''
-        We can also do some logic here around the use of "crabs" and "lobsters" in enigma, where we can isolate repeated characters in the input and output, within short spans of each other, and use it to boost the loss gradient in a certain direction! 
-
-        Step 1: Find the rotation matrices, and find, for each rotor, the index of positions in the whole sequence whre only that rotor is in a different position.
-        Step 2: For each set of indexes, check the sequence for pairs of input+output that are the same or reverses of each other. 
-        step3: for each of those pairs, calculate the distance apart they are. 
-        Step 4: that distance means that where the rotor in position x might have X->Y, the rotor in position x+distance might have Y->X.  
-        step 5: This means we can make a matrix knowing that from a certain input on that rotor, that rotors parameters are offset by "distance" in the row "distance" down the rotor. 
-        Step 6: We can then use the L1 loss to push the rotor assignments to be more like the row "distance" down the rotor.
-        step 7: sum this loss across all occurrences of the rotor in that position.     
         
-        '''
-
-
         return loss#--+L2+L1
+    
     
     def on_train_epoch_end(self):
         self.compare_to_gt(self.trainer.datamodule.dataset.rotors,self.trainer.datamodule.dataset.reflector)
+
 
     def print_enigma_settings(self):
         print("Rotor 1 : ",self.R1.getWeight().max(1).indices)
