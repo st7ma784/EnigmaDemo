@@ -16,7 +16,7 @@ if __name__=="__main__":
                 'values':[1e-1,1e-2,1e-3,2e-4,1e-4,5e-5,2e-5]
             },
             'batch_size': {
-                'values': [16,24,32]
+                'values': [256]
             },
             'precision': {
                 'values': ['32']
@@ -28,7 +28,7 @@ if __name__=="__main__":
                 "values":[0.01, 0.03, 0.05, 0.1, 0.5]
             },
             "gs_n_iter":{
-                "values":[1,10,50,100,500]
+                "values":[1,10,50,100]
             },
             "gs_noise_factor":{
                 "values":[0,0.2,0.4,0.6,0.8]

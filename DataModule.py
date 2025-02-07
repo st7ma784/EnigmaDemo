@@ -7,10 +7,11 @@ from torch.utils.data import ConcatDataset
 # Our dataModule is going to have a dataset that is initialised by 3 rotors, and a reflector.
 
 class EnigmaDataModule(pl.LightningDataModule):
-    def __init__(self,rotors = None ,reflector=None):
+    def __init__(self,rotors = None ,reflector=None,batch_size=32):
         super().__init__()
         self.rotors=rotors
         self.reflector=reflector
+        self.batch_size=batch_size
         if rotors is None:
             rotorA=torch.randperm(26)
             rotorB=torch.randperm(26)
@@ -48,12 +49,12 @@ class EnigmaDataModule(pl.LightningDataModule):
         #This is the dataloader that will be used for training.
 
         # There are some other flags that may be worth playing with, such as num_workers, pin_memory, and prefetch_factor, what do they do?
-        return torch.utils.data.DataLoader(self.dataset,batch_size=16,num_workers=4,pin_memory=True)
+        return torch.utils.data.DataLoader(self.dataset,batch_size=self.batch_size,num_workers=12,pin_memory=True,prefetch_factor=4)
     
     def val_dataloader(self):
-        return torch.utils.data.DataLoader(self.dataset,batch_size=16)
+        return torch.utils.data.DataLoader(self.dataset,batch_size=self.batch_size)
     def test_dataloader(self):
-        return torch.utils.data.DataLoader(self.dataset,batch_size=16)
+        return torch.utils.data.DataLoader(self.dataset,batch_size=self.batch_size)
     
 
 class EnigmaDataset(torch.utils.data.IterableDataset):

@@ -41,7 +41,7 @@ class RotorBase(LightningModule):
         self.gs_tau=gs_tau
         self.gs_n_iter=gs_n_iter
         self.gs_noise_factor=gs_noise_factor
-        self.Base=torch.arange(26).unsqueeze(0)
+        self.Base=torch.arange(26).unsqueeze(0).to(self.device)
         self.ProcessPermute=self.ForwardMatrix
         if self.gs_n_iter==0:
             self.getrotor=self.Rotor
@@ -58,22 +58,22 @@ class RotorBase(LightningModule):
     def ForwardMatrix(self,x):
         return x
     def generate_rotation_matrixPos0(self,sequence_length):
-        return torch.zeros(sequence_length,dtype=torch.long)
+        return torch.zeros(sequence_length,dtype=torch.long).to(self.device)
     def generate_rotation_matrixPos1(self,sequence_length):
-        return torch.remainder(torch.arange(sequence_length,dtype=torch.long),26)
+        return torch.remainder(torch.arange(sequence_length,dtype=torch.long),26).to(self.device)
     def generate_rotation_matrixPos2(self,sequence_length):
-        return torch.remainder(torch.arange(sequence_length,dtype=torch.long)//7,26)
+        return torch.remainder(torch.arange(sequence_length,dtype=torch.long)//7,26).to(self.device)
     def generate_rotation_matrixPos3(self,sequence_length):
-        return torch.remainder(torch.arange(sequence_length,dtype=torch.long)//11,26)
+        return torch.remainder(torch.arange(sequence_length,dtype=torch.long)//11,26).to(self.device)
     def Rotor(self):
-        return self.rotor
+        return self.rotor.to(self.device)
     def GSRotor(self):
-        return gumbel_sinkhorn(self.rotor,self.gs_tau,self.gs_n_iter,self.gs_noise_factor)
+        return gumbel_sinkhorn(self.rotor.to(self.device),self.gs_tau,self.gs_n_iter,self.gs_noise_factor)
     def forward(self,signalInput):
         Sequence_Length=signalInput.shape[1]
         # Step 1 Build a rotation matrix, that is a tensor of shape (S,26,26) that will rotate the so that in position 1 , its identity, in position 2, it's rotated by 1, etc.
         rotationMatrix=self.generate_rotation_matrix(Sequence_Length).unsqueeze(1)
-        rotationMatrix=torch.remainder(torch.add(rotationMatrix,self.Base),26)
+        rotationMatrix=torch.remainder(torch.add(rotationMatrix,self.Base.to(self.device)),26)
         positionRotorMatrix=torch.nn.functional.one_hot(rotationMatrix,26).to(torch.float) #this is an offset identity matrix of shape (S,26,26)
         # Step 2: Multiply the rotor by the offset identity matrix
         positionRotorMatrix=positionRotorMatrix@self.getrotor() #this should be s,26,26
@@ -199,10 +199,67 @@ class Enigma(LightningModule):
         decoded=self.forward(encoded) 
         loss=self.loss(decoded.permute(0,2,1),GT)
         self.log(self.lossName,loss,prog_bar=True)
-        #L1 Loss will be the rowwise sum of the rotors.
         #L2 will be the rowwise sum of the square of the rotors.
+        L2=torch.abs(1-torch.norm(self.R1.getWeight(),dim=(1),keepdim=True).mean()) + torch.abs(1-torch.norm(self.R2.getWeight(),dim=(1),keepdim=True).mean()) + torch.abs(1-torch.norm(self.R3.getWeight(),dim=(1),keepdim=True).mean()) + torch.abs(1-torch.norm(self.REF.getWeight(),dim=(0),keepdim=True).mean())
+        L2=L2/4
+        self.log("L2Loss", torch.abs(1-L2))
+        L1=torch.abs(1-torch.norm(self.R1.getWeight(),p=1,dim=(1),keepdim=True).mean()) + torch.abs(1-torch.norm(self.R2.getWeight(),p=1,dim=(1),keepdim=True).mean()) + torch.abs(1-torch.norm(self.R3.getWeight(),p=1,dim=(1),keepdim=True).mean()) + torch.abs(1-torch.norm(self.REF.getWeight(),p=1,dim=(0),keepdim=True).mean())
+        L1=L1/4
+        self.log("L1Loss", torch.abs(1-L1))
+
+        '''
+        We can also do some logic here around the use of "crabs" and "lobsters" in enigma, where we can isolate repeated characters in the input and output, within short spans of each other, and use it to boost the loss gradient in a certain direction! 
+
+        Step 1: Find the rotation matrices, and find, for each rotor, the index of positions in the whole sequence whre only that rotor is in a different position.
+        Step 2: For each set of indexes, check the sequence for pairs of input+output that are the same or reverses of each other. 
+        step 3: for each of those pairs, calculate the distance apart they are. 
+        Step 4: that distance means that where the rotor in position x might have X->Y, the rotor in position x+distance might have Y->X.  
+        step 5: This means we can make a matrix knowing that from a certain input on that rotor, that rotors parameters are offset by "distance" in the row "distance" down the rotor. 
+        Step 6: We can then use the L1 loss to push the rotor assignments to be more like the row "distance" down the rotor.
+        step 7: sum this loss across all occurrences of the rotor in that position.     
+        '''
+        R1_unique=self.R2.generate_rotation_matrix() + (self.R3.generate_rotation_matrix()*26)
+        unique_R1_Values= torch.unique(R1_unique)
+        span_masks_R1= R1_unique[R1_unique.unsqueeze(1)==unique_R1_Values.unsqueeze(0)].T #U_r1,S
+
+        one_hot_letter_pairs = encoded+torch.nn.functional.one_hot(GT,26)#B,S,26
+
+        letter_pairs_per_span=one_hot_letter_pairs.unsqueeze(1)@span_masks_R1.unsqueeze(0).unsqueeze(-1) #B,U_r1,S,26
+        #Create a matrix of shape B,U_r1,S,S that is the dot product of the letter pairs, so that only the same pairs sum >1 on the diagonal
+        Repeat_letterPair_matrix=torch.einsum("busa,buat->bust",letter_pairs_per_span,letter_pairs_per_span.permute(0,1,3,2)) #B,U_r1,S,S
+        #find the pairs of letter pairs that are the same, and have a sum >1
+        Similar_positions_tokens_pairs=Repeat_letterPair_matrix.diagonal(dim1=2,dim2=3)>1 #B,U_r1,S
+        #convert back to letter pairs
+        Similar_positions_tokens_pairs=Similar_positions_tokens_pairs*letter_pairs_per_span #B,U_r1,S,26
+        #This gives us per batch, and per repeated positions, the one-hot letter pairs that repeat, and the positions they repeat in.
+
+        rotationMatrix=torch.remainder(torch.sub(self.R1.generate_rotation_matrix(),torch.arange(26,device=self.device)),26)
+        RotationMatrix_To_reverse_to_Pos0=torch.nn.functional.one_hot(rotationMatrix,26).to(torch.float) #shape is S,26,26 # this is an assignment matrix to get the letters back to which row they go through in rotor pos0 
+        rotor_rows= torch.einsum("busa,sab->busab",Similar_positions_tokens_pairs,RotationMatrix_To_reverse_to_Pos0) #B,U_r1,S,26,26
+        offsets=torch.arange(R1_unique.shape[0],device=self.device).unsqueeze(0).unsqueeze(0).unsqueeze(-1) #1,1,S,1
+        offsets=Similar_positions_tokens_pairs*offsets #B,U_r1,S,26
+        offsets=torch.sum(torch.delta(offsets,dim=2),dim=2) #B,U_r1
+        #make a matrix of shape B,U_r1,26,26 that is the offset matrix
+        offsets_matrix=torch.remainder(torch.arange(26).unsqueeze(0).unsqueeze(0).add(offsets.unsqueeze(-1)),26) #B,U_r1,26
+        offsets_matrix=torch.nn.functional.one_hot(offsets_matrix,26) #this matrix moves the rotor on by the distance between repeated characters.
+        #make a matrix of shape B,U_r1,26,26 that is the offset matrix
+        rotor_rows_pool=torch.einsum("busac,busac->busac",rotor_rows,offsets_matrix) # B,U_r1,S,26,26
         
-        return loss#--+L2+L1
+        #now sum to get 26x26 matrices of the rotor rows? 
+        rotor_rows_pool=torch.sum(torch.sum(torch.sum(rotor_rows_pool,dim=2),dim=1),dim=0) #B,26,26
+        R1Loss=L1(self.R1.getWeight(),rotor_rows_pool)
+        self.log("R1Loss",R1Loss)
+        R1Loss2=L1(self.R1.getWeight(),rotor_rows_pool.T)
+        self.log("R1Loss2",R1Loss2)
+        
+  
+        #repeat for R2
+        
+
+
+
+
+        return loss+L2+L1
     
     
     def on_train_epoch_end(self):
@@ -301,7 +358,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--optimizer_name",type=str,default="sgd")
     parser.add_argument("--learning_rate",type=float,default=0.2)
-    parser.add_argument("--batch_size",type=int,default=64)
+    parser.add_argument("--batch_size",type=int,default=128)
     parser.add_argument("--precision",type=str,default="32")
     parser.add_argument("--activation",type=str,default="gelu")
     parser.add_argument("--gs_tau",type=float,default=10)
@@ -318,7 +375,7 @@ if __name__ == "__main__":
     model=Enigma(args.optimizer_name,args.learning_rate,args.batch_size,args.precision,args.activation,args.loss,args.gs_tau,args.gs_n_iter,args.gs_noise_factor)
     model.print_enigma_settings()
 
-    dm=EnigmaDataModule()
+    dm=EnigmaDataModule(batch_size=args.batch_size)
     dm.setup(stage="train")
    
     #login as anonymous
@@ -380,7 +437,7 @@ if __name__ == "__main__":
     else:
         trainer=pl.Trainer(max_epochs=500,
                        max_steps=30000,
-                        devices="auto",
+                        devices=1,
                         accelerator="auto",
                         logger=wandb_logger,
                         callbacks=[early_stop_callback,progress_bar])
