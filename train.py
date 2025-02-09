@@ -132,7 +132,7 @@ class Enigma(LightningModule):
         self.R3=RotorBase(3,gs_tau,gs_n_iter,gs_noise_factor)
         self.REF=Reflector(0,gs_tau,gs_n_iter,gs_noise_factor)
         self.softmax=nn.Softmax(dim=2)
-        L1=torch.nn.L1Loss()
+        self.L1=torch.nn.L1Loss()
         self.save_hyperparameters()
     def configure_optimizers(self):
         params=list(self.R1.parameters()) + list(self.R2.parameters()) + list(self.R3.parameters()) + list(self.REF.parameters())
@@ -218,40 +218,41 @@ class Enigma(LightningModule):
         Step 6: We can then use the L1 loss to push the rotor assignments to be more like the row "distance" down the rotor.
         step 7: sum this loss across all occurrences of the rotor in that position.     
         '''
-        R1_unique=self.R2.generate_rotation_matrix() + (self.R3.generate_rotation_matrix()*26)
-        unique_R1_Values= torch.unique(R1_unique)
-        span_masks_R1= R1_unique[R1_unique.unsqueeze(1)==unique_R1_Values.unsqueeze(0)].T #U_r1,S
+        R1_unique=self.R2.generate_rotation_matrix(encoded.shape[1]) + (self.R3.generate_rotation_matrix(encoded.shape[1])*26)
+        unique_R1_Values= torch.unique(R1_unique).unsqueeze(0) #1,S
+        R1_unique=R1_unique.unsqueeze(1) #S,1
+        span_masks_R1= (R1_unique==unique_R1_Values).T #U_r1,S
 
         one_hot_letter_pairs = encoded+torch.nn.functional.one_hot(GT,26)#B,S,26
 
-        letter_pairs_per_span=one_hot_letter_pairs.unsqueeze(1)@span_masks_R1.unsqueeze(0).unsqueeze(-1) #B,U_r1,S,26
+        letter_pairs_per_span=one_hot_letter_pairs.unsqueeze(1)*span_masks_R1.unsqueeze(0).unsqueeze(-1) #B,U_r1,S,26
         #Create a matrix of shape B,U_r1,S,S that is the dot product of the letter pairs, so that only the same pairs sum >1 on the diagonal
         Repeat_letterPair_matrix=torch.einsum("busa,buat->bust",letter_pairs_per_span,letter_pairs_per_span.permute(0,1,3,2)) #B,U_r1,S,S
         #find the pairs of letter pairs that are the same, and have a sum >1
         Similar_positions_tokens_pairs=Repeat_letterPair_matrix.diagonal(dim1=2,dim2=3)>1 #B,U_r1,S
         #convert back to letter pairs
-        Similar_positions_tokens_pairs=Similar_positions_tokens_pairs*letter_pairs_per_span #B,U_r1,S,26
+        Similar_positions_tokens_pairs=Similar_positions_tokens_pairs.unsqueeze(-1)*letter_pairs_per_span #B,U_r1,S,26
         #This gives us per batch, and per repeated positions, the one-hot letter pairs that repeat, and the positions they repeat in.
 
-        rotationMatrix=torch.remainder(torch.sub(self.R1.generate_rotation_matrix(),torch.arange(26,device=self.device)),26)
+        rotationMatrix=torch.remainder(torch.sub(self.R1.generate_rotation_matrix(encoded.shape[1]).unsqueeze(1),torch.arange(26,device=self.device).unsqueeze(0)),26)
         RotationMatrix_To_reverse_to_Pos0=torch.nn.functional.one_hot(rotationMatrix,26).to(torch.float) #shape is S,26,26 # this is an assignment matrix to get the letters back to which row they go through in rotor pos0 
-        rotor_rows= torch.einsum("busa,sab->busab",Similar_positions_tokens_pairs,RotationMatrix_To_reverse_to_Pos0) #B,U_r1,S,26,26
+        rotor_rows= torch.einsum("busa,sac->busac",Similar_positions_tokens_pairs,RotationMatrix_To_reverse_to_Pos0) #B,U_r1,S,26,26
         offsets=torch.arange(R1_unique.shape[0],device=self.device).unsqueeze(0).unsqueeze(0).unsqueeze(-1) #1,1,S,1
         offsets=Similar_positions_tokens_pairs*offsets #B,U_r1,S,26
-        offsets=torch.sum(torch.delta(offsets,dim=2),dim=2) #B,U_r1
+        offsets=torch.sum(torch.diff(offsets,dim=2),dim=2).to(torch.long) #B,U_r1
         #make a matrix of shape B,U_r1,26,26 that is the offset matrix
-        offsets_matrix=torch.remainder(torch.arange(26).unsqueeze(0).unsqueeze(0).add(offsets.unsqueeze(-1)),26) #B,U_r1,26
+        offsets_matrix=torch.remainder(torch.arange(26,device=self.device).unsqueeze(0).unsqueeze(0).add(offsets.unsqueeze(-1)),26).to(torch.long) #B,U_r1,26
         offsets_matrix=torch.nn.functional.one_hot(offsets_matrix,26) #this matrix moves the rotor on by the distance between repeated characters.
         #make a matrix of shape B,U_r1,26,26 that is the offset matrix
-        rotor_rows_pool=torch.einsum("busac,busac->busac",rotor_rows,offsets_matrix) # B,U_r1,S,26,26
+        rotor_rows_pool=torch.einsum("busac,bu...ca->busac",rotor_rows,offsets_matrix) # B,U_r1,S,26,26
         
         #now sum to get 26x26 matrices of the rotor rows? 
         rotor_rows_pool=torch.sum(torch.sum(torch.sum(rotor_rows_pool,dim=2),dim=1),dim=0) #B,26,26
-        R1Loss=L1(self.R1.getWeight(),rotor_rows_pool)
+        R1Loss=self.L1(self.R1.rotor,rotor_rows_pool)
         self.log("R1Loss",R1Loss)
-        R1Loss2=L1(self.R1.getWeight(),rotor_rows_pool.T)
+        R1Loss2=self.L1(self.R1.rotor,rotor_rows_pool.T)
         self.log("R1Loss2",R1Loss2)
-        
+
   
         #repeat for R2
         
@@ -259,7 +260,7 @@ class Enigma(LightningModule):
 
 
 
-        return loss+L2+L1
+        return loss+L2+L1+R1Loss+R1Loss2
     
     
     def on_train_epoch_end(self):
@@ -358,7 +359,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--optimizer_name",type=str,default="sgd")
     parser.add_argument("--learning_rate",type=float,default=0.2)
-    parser.add_argument("--batch_size",type=int,default=128)
+    parser.add_argument("--batch_size",type=int,default=32)
     parser.add_argument("--precision",type=str,default="32")
     parser.add_argument("--activation",type=str,default="gelu")
     parser.add_argument("--gs_tau",type=float,default=10)
