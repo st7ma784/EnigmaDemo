@@ -244,8 +244,8 @@ class Enigma(LightningModule):
         offsets_matrix=torch.remainder(torch.arange(26,device=self.device).unsqueeze(0).unsqueeze(0).add(offsets.unsqueeze(-1)),26).to(torch.long) #B,U_r1,26
         offsets_matrix=torch.nn.functional.one_hot(offsets_matrix,26) #this matrix moves the rotor on by the distance between repeated characters.
         #make a matrix of shape B,U_r1,26,26 that is the offset matrix
-        rotor_rows_pool=torch.einsum("busac,bu...ca->busac",rotor_rows,offsets_matrix) # B,U_r1,S,26,26
-        
+        # rotor_rows_pool=torch.einsum("busac,bu...ca->busac",rotor_rows,offsets_matrix) # B,U_r1,S,26,26
+        rotor_rows_pool=torch.bmm(rotor_rows.flatten(0,1),offsets_matrix.flatten(0,1)).reshape(rotor_rows.shape) #B,U_r1,S,26,26
         #now sum to get 26x26 matrices of the rotor rows? 
         rotor_rows_pool=torch.sum(torch.sum(torch.sum(rotor_rows_pool,dim=2),dim=1),dim=0) #B,26,26
         R1Loss=self.L1(self.R1.rotor,rotor_rows_pool)
